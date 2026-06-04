@@ -19,6 +19,7 @@ const SOURCES: Record<string, { label: string; cls: string; cta: string }> = {
   weworkremotely: { label: "🌍 WeWorkRemotely", cls: "bg-teal-100 text-teal-700", cta: "Apply on WeWorkRemotely" },
   remotive: { label: "🌍 Remotive", cls: "bg-cyan-100 text-cyan-700", cta: "Apply on Remotive" },
   arbeitnow: { label: "🌍 Arbeitnow (EU)", cls: "bg-indigo-100 text-indigo-700", cta: "Apply on Arbeitnow" },
+  wpjobs: { label: "📋 WordPress Jobs", cls: "bg-blue-100 text-blue-700", cta: "View on WordPress Jobs" },
 };
 function sourceOf(src?: string) {
   return SOURCES[src ?? "freelancer"] ?? SOURCES.freelancer;

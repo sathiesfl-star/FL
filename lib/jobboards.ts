@@ -25,7 +25,7 @@ const HEADERS = {
  *  remotive + arbeitnow are JSON APIs that work from cloud servers (Vercel);
  *  remoteok's RSS is Cloudflare-protected and often blocked there. */
 export function enabledBoards(): string[] {
-  const raw = (process.env.JOB_BOARDS ?? "remoteok,weworkremotely,remotive,arbeitnow").toLowerCase().trim();
+  const raw = (process.env.JOB_BOARDS ?? "remoteok,weworkremotely,remotive,arbeitnow,wpjobs").toLowerCase().trim();
   if (!raw || raw === "off" || raw === "none") return [];
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
@@ -44,6 +44,7 @@ export async function fetchJobBoards(keywords: string[] = []): Promise<Freelance
   if (boards.includes("weworkremotely")) jobs.push(fetchWeWorkRemotely());
   if (boards.includes("remotive")) jobs.push(fetchRemotive());
   if (boards.includes("arbeitnow")) jobs.push(fetchArbeitnow());
+  if (boards.includes("wpjobs")) jobs.push(fetchWordPressJobs());
 
   const results = await Promise.all(jobs);
 
@@ -250,6 +251,44 @@ async function fetchArbeitnow(): Promise<FreelancerProject[]> {
       source: "arbeitnow",
       company: company || undefined,
       location: j.location ? String(j.location) : (j.remote ? "Remote" : undefined),
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// WordPress.net jobs — https://jobs.wordpress.net/feed/  (standard RSS)
+// Real WordPress/WooCommerce PROJECTS posted by clients — a strong fit for an
+// agency whose core skills are WordPress/Woo. Item: title/link/description/pubDate.
+// ---------------------------------------------------------------------------
+
+async function fetchWordPressJobs(): Promise<FreelancerProject[]> {
+  const xml = await fetchFeed("https://jobs.wordpress.net/feed/");
+  const out: FreelancerProject[] = [];
+  for (const body of itemBlocks(xml)) {
+    const title = decodeXml(pick(body, "title")).trim();
+    const link = pick(body, "link").trim();
+    if (!title || !link) continue;
+    const description = stripHtml(decodeXml(pick(body, "description")));
+    const pub = pick(body, "pubDate").trim();
+    const cats = [...body.matchAll(/<category[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/category>/gi)]
+      .map((m) => decodeXml(m[1]).trim())
+      .filter(Boolean);
+    const id = link.match(/(\d+)\/?$/)?.[1] || link;
+    out.push({
+      freelancerId: `wpjobs-${id}`,
+      title,
+      description: description.slice(0, 1500),
+      url: link,
+      // It's a WordPress board — always tag WordPress so it matches the skill gate,
+      // plus any post categories.
+      skills: ["WordPress", ...cats],
+      currency: "USD", // board is English/Western; treat as USD for the US-focus filter
+      projectType: "fixed",
+      bidCount: 0,
+      sealed: false,
+      postedAt: pub ? safeDate(pub) : new Date().toISOString(),
+      source: "wpjobs",
     });
   }
   return out;
