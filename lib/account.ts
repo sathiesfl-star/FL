@@ -40,6 +40,8 @@ export interface PlainProfile {
   maxBudgetUsd?: number;
   projectTypes: ("fixed" | "hourly")[];
   avoid: { contests: boolean; sealed: boolean; unverifiedClients: boolean; vague: boolean };
+  excludeCurrencies: string[];
+  excludeKeywords: string[];
 }
 
 export async function getActiveProfile(): Promise<PlainProfile> {
@@ -52,5 +54,7 @@ export async function getActiveProfile(): Promise<PlainProfile> {
     maxBudgetUsd: profile.maxBudgetUsd,
     projectTypes: profile.projectTypes,
     avoid: profile.avoid,
+    excludeCurrencies: profile.excludeCurrencies ?? [],
+    excludeKeywords: profile.excludeKeywords ?? [],
   };
 }

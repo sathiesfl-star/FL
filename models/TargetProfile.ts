@@ -20,6 +20,8 @@ export interface ITargetProfile {
     unverifiedClients: boolean; // no payment verified
     vague: boolean; // one-line / low-effort posts
   };
+  excludeCurrencies: string[]; // hide projects in these currencies (proxy for country, e.g. NGN, PKR)
+  excludeKeywords: string[]; // hide projects whose title/description contains any of these
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +41,8 @@ const TargetProfileSchema = new Schema<ITargetProfile>(
       unverifiedClients: { type: Boolean, default: false },
       vague: { type: Boolean, default: true },
     },
+    excludeCurrencies: { type: [String], default: [] },
+    excludeKeywords: { type: [String], default: [] },
   },
   { timestamps: true }
 );

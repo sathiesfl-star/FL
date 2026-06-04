@@ -14,6 +14,8 @@ export default async function ProjectsPage() {
     maxBudgetUsd: profile.maxBudgetUsd,
     projectTypes: profile.projectTypes,
     avoid: profile.avoid,
+    excludeCurrencies: profile.excludeCurrencies,
+    excludeKeywords: profile.excludeKeywords,
   };
 
   // Fetch active projects. In RSS mode we pull a keyword feed per selected skill (label),

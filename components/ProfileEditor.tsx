@@ -12,8 +12,19 @@ export function ProfileEditor({ profile, skills }: { profile: PlainProfile; skil
   const [minBudget, setMinBudget] = useState(String(profile.minBudgetUsd));
   const [types, setTypes] = useState<Set<string>>(new Set(profile.projectTypes));
   const [avoid, setAvoid] = useState(profile.avoid);
+  const [excludeCurrencies, setExcludeCurrencies] = useState<Set<string>>(new Set(profile.excludeCurrencies));
+  const [excludeKeywords, setExcludeKeywords] = useState(profile.excludeKeywords.join("\n"));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  function toggleCurrency(c: string) {
+    setExcludeCurrencies((s) => {
+      const next = new Set(s);
+      next.has(c) ? next.delete(c) : next.add(c);
+      return next;
+    });
+    setSaved(false);
+  }
 
   function toggleSkill(key: string) {
     setSelected((s) => {
@@ -42,6 +53,8 @@ export function ProfileEditor({ profile, skills }: { profile: PlainProfile; skil
         minBudgetUsd: Number(minBudget) || 0,
         projectTypes: [...types],
         avoid,
+        excludeCurrencies: [...excludeCurrencies],
+        excludeKeywords,
       }),
     });
     setSaving(false);
@@ -142,6 +155,56 @@ export function ProfileEditor({ profile, skills }: { profile: PlainProfile; skil
               </label>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Exclude countries / currencies / keywords */}
+      <section className="rounded-xl border bg-white p-5">
+        <h2 className="font-semibold text-slate-900">Exclude projects</h2>
+        <p className="text-xs text-slate-500">
+          Hide projects you don&apos;t want — by currency (a rough proxy for the client&apos;s country) or by keyword.
+        </p>
+
+        <div className="mt-4">
+          <span className="text-xs font-semibold uppercase text-slate-500">Exclude currencies (country proxy)</span>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {[
+              ["NGN", "🇳🇬 Nigeria"],
+              ["PKR", "🇵🇰 Pakistan"],
+              ["BDT", "🇧🇩 Bangladesh"],
+              ["INR", "🇮🇳 India"],
+              ["IDR", "🇮🇩 Indonesia"],
+              ["EGP", "🇪🇬 Egypt"],
+              ["KES", "🇰🇪 Kenya"],
+              ["PHP", "🇵🇭 Philippines"],
+            ].map(([code, label]) => {
+              const on = excludeCurrencies.has(code);
+              return (
+                <button
+                  key={code}
+                  onClick={() => toggleCurrency(code)}
+                  className={`rounded-full border px-3 py-1.5 text-sm font-medium ${
+                    on ? "border-red-400 bg-red-50 text-red-700" : "border-slate-200 text-slate-600 hover:border-red-300"
+                  }`}
+                >
+                  {on ? "✕ " : ""}{label} ({code})
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[11px] text-slate-400">Note: not perfect — some clients post in USD regardless of country.</p>
+        </div>
+
+        <div className="mt-4">
+          <span className="text-xs font-semibold uppercase text-slate-500">Exclude keywords / phrases (one per line)</span>
+          <textarea
+            value={excludeKeywords}
+            onChange={(e) => { setExcludeKeywords(e.target.value); setSaved(false); }}
+            rows={4}
+            placeholder={"nigeria\nlagos\nstudents only\nfree work\nlowest price"}
+            className="mt-1.5 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-brand"
+          />
+          <p className="mt-1 text-[11px] text-slate-400">Any project whose title/description contains one of these is hidden.</p>
         </div>
       </section>
 

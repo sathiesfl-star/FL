@@ -38,6 +38,8 @@ export interface ProfileFilter {
   maxBudgetUsd?: number;
   projectTypes: ("fixed" | "hourly")[];
   avoid: { contests: boolean; sealed: boolean; unverifiedClients: boolean; vague: boolean };
+  excludeCurrencies?: string[];
+  excludeKeywords?: string[];
 }
 
 export function scoreProject(p: FreelancerProject, profile: ProfileFilter): ScoredProject {
@@ -83,8 +85,21 @@ export function scoreProject(p: FreelancerProject, profile: ProfileFilter): Scor
 export function passesProfile(p: FreelancerProject, profile: ProfileFilter): boolean {
   if (!profile.projectTypes.includes(p.projectType)) return false;
   if (profile.avoid.sealed && p.sealed) return false;
-  // Must match at least one selected skill keyword (relevance gate).
+
   const haystack = `${p.title} ${p.description} ${p.skills.join(" ")}`.toLowerCase();
+
+  // Exclude by currency (proxy for country — e.g. NGN, PKR).
+  if (profile.excludeCurrencies?.length) {
+    const cur = (p.currency || "").toUpperCase();
+    if (profile.excludeCurrencies.map((c) => c.toUpperCase()).includes(cur)) return false;
+  }
+
+  // Exclude by keyword/phrase in the title/description (e.g. country names, scam signals).
+  if (profile.excludeKeywords?.length) {
+    if (profile.excludeKeywords.some((kw) => kw.trim() && haystack.includes(kw.toLowerCase().trim()))) return false;
+  }
+
+  // Must match at least one selected skill keyword (relevance gate).
   const keywords = matchKeywordsFor(profile.skills);
   if (keywords.length && !keywords.some((kw) => haystack.includes(kw))) return false;
   return true;

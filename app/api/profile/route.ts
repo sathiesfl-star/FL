@@ -26,6 +26,18 @@ export async function PUT(req: Request) {
     ? body.projectTypes.filter((t: string) => t === "fixed" || t === "hourly")
     : profile.projectTypes;
 
+  const excludeCurrencies = Array.isArray(body.excludeCurrencies)
+    ? body.excludeCurrencies.map((c: string) => String(c).toUpperCase().trim()).filter(Boolean)
+    : profile.excludeCurrencies ?? [];
+
+  // Keywords come as a newline/comma-separated string from the UI.
+  const excludeKeywords =
+    typeof body.excludeKeywords === "string"
+      ? body.excludeKeywords.split(/[\n,]/).map((s: string) => s.trim()).filter(Boolean)
+      : Array.isArray(body.excludeKeywords)
+        ? body.excludeKeywords
+        : profile.excludeKeywords ?? [];
+
   await TargetProfile.updateOne(
     { _id: profile._id, accountId: account._id },
     {
@@ -41,6 +53,8 @@ export async function PUT(req: Request) {
           unverifiedClients: !!body.avoid?.unverifiedClients,
           vague: !!body.avoid?.vague,
         },
+        excludeCurrencies,
+        excludeKeywords,
       },
     }
   );
