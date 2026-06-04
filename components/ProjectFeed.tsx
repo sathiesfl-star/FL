@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { ExternalLink, RefreshCcw, AlertTriangle, Clock, Users, DollarSign, Sparkles, Copy, Check as CheckIcon, Zap } from "lucide-react";
 import type { ScoredProject, FreshnessTier } from "@/lib/relevance";
@@ -83,10 +83,11 @@ export function ProjectFeed({
   const sorted = [...visible].sort((a, b) => {
     if (sortBy === "fresh") return a.ageMinutes - b.ageMinutes;
     if (sortBy === "fit") return b.matchScore - a.matchScore;
-    // "site": group by source/website (alphabetical), best fit first within each.
+    // "site": group by source/website (alphabetical), newest first within each
+    // so you can scan one site at a time and grab its latest projects.
     const sa = a.source ?? "freelancer";
     const sb = b.source ?? "freelancer";
-    return sa === sb ? b.matchScore - a.matchScore : sa.localeCompare(sb);
+    return sa === sb ? a.ageMinutes - b.ageMinutes : sa.localeCompare(sb);
   });
   // Relative timestamps are computed client-side only, to avoid a server/client
   // hydration mismatch when a minute ticks over between render passes.
@@ -217,8 +218,25 @@ export function ProjectFeed({
       )}
 
       <div className="space-y-3">
-        {sorted.map((p) => (
-          <div key={p.freelancerId} className={`rounded-xl border bg-white p-4 ${p.freshness === "prime" ? "ring-1 ring-emerald-300" : ""}`}>
+        {sorted.map((p, i) => {
+          // When sorting "By website", show a header each time the source changes,
+          // so each site's latest projects are grouped under a clear heading.
+          const prevSrc = i > 0 ? sorted[i - 1].source ?? "freelancer" : null;
+          const curSrc = p.source ?? "freelancer";
+          const showSiteHeader = sortBy === "site" && curSrc !== prevSrc;
+          const siteCount = sorted.filter((x) => (x.source ?? "freelancer") === curSrc).length;
+          return (
+          <Fragment key={p.freelancerId}>
+          {showSiteHeader && (
+            <div className="flex items-center gap-2 pt-2 first:pt-0">
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${sourceOf(p.source).cls}`}>
+                {sourceOf(p.source).label}
+              </span>
+              <span className="text-xs text-slate-400">{siteCount} project{siteCount === 1 ? "" : "s"} · newest first</span>
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+          )}
+          <div className={`rounded-xl border bg-white p-4 ${p.freshness === "prime" ? "ring-1 ring-emerald-300" : ""}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -336,7 +354,9 @@ export function ProjectFeed({
               </div>
             )}
           </div>
-        ))}
+          </Fragment>
+          );
+        })}
 
         {sorted.length === 0 && keywordCount > 0 && !fetchError && (
           <div className="rounded-xl border bg-white p-8 text-center text-slate-500">
