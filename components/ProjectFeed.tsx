@@ -12,6 +12,16 @@ const FRESHNESS: Record<FreshnessTier, { label: string; cls: string; hint: strin
   late: { label: "Late", cls: "bg-slate-100 text-slate-500", hint: "Older post — likely buried. Only bid if it's a strong fit." },
 };
 
+// Where each listing comes from. Freelancer = bid; the overseas job boards = apply directly.
+const SOURCES: Record<string, { label: string; cls: string; cta: string }> = {
+  freelancer: { label: "Freelancer", cls: "bg-violet-100 text-violet-700", cta: "Bid on Freelancer" },
+  remoteok: { label: "🌍 RemoteOK", cls: "bg-sky-100 text-sky-700", cta: "Apply on RemoteOK" },
+  weworkremotely: { label: "🌍 WeWorkRemotely", cls: "bg-teal-100 text-teal-700", cta: "Apply on WeWorkRemotely" },
+};
+function sourceOf(src?: string) {
+  return SOURCES[src ?? "freelancer"] ?? SOURCES.freelancer;
+}
+
 interface AiState {
   loading: boolean;
   score?: number;
@@ -59,6 +69,7 @@ export function ProjectFeed({
     sortBy === "fresh" ? a.ageMinutes - b.ageMinutes : b.matchScore - a.matchScore
   );
   const primeCount = projects.filter((p) => p.freshness === "prime").length;
+  const overseasCount = projects.filter((p) => p.source && p.source !== "freelancer").length;
   // Relative timestamps are computed client-side only, to avoid a server/client
   // hydration mismatch when a minute ticks over between render passes.
   const [mounted, setMounted] = useState(false);
@@ -104,7 +115,8 @@ export function ProjectFeed({
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Project Feed</h1>
           <p className="text-sm text-slate-500">
-            {projects.length} matching · {primeCount} fresh (bid now) ·{" "}
+            {projects.length} matching · {primeCount} fresh (bid now)
+            {overseasCount > 0 && <> · <span className="text-sky-600">{overseasCount} overseas 🌍</span></>} ·{" "}
             <span className={mode === "mock" ? "text-amber-600" : "text-emerald-600"}>{mode} mode</span>
           </p>
         </div>
@@ -161,6 +173,12 @@ export function ProjectFeed({
           <div key={p.freelancerId} className={`rounded-xl border bg-white p-4 ${p.freshness === "prime" ? "ring-1 ring-emerald-300" : ""}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${sourceOf(p.source).cls}`}>
+                    {sourceOf(p.source).label}
+                  </span>
+                  {p.location && <span className="text-[11px] text-slate-400">{p.location}</span>}
+                </div>
                 <h3 className="font-semibold text-slate-900">{p.title}</h3>
                 <p className="mt-1 line-clamp-2 text-sm text-slate-600">{p.description}</p>
               </div>
@@ -175,11 +193,17 @@ export function ProjectFeed({
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-              <span className="flex items-center gap-1">
-                <DollarSign className="h-3.5 w-3.5" />
-                {p.budgetMin ?? "?"}–{p.budgetMax ?? "?"} {p.currency} · {p.projectType}
-              </span>
-              <span className="flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {p.bidCount} bids</span>
+              {p.budgetMin || p.budgetMax ? (
+                <span className="flex items-center gap-1">
+                  <DollarSign className="h-3.5 w-3.5" />
+                  {p.budgetMin ?? "?"}–{p.budgetMax ?? "?"} {p.currency} · {p.projectType}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1"><DollarSign className="h-3.5 w-3.5" /> Remote role · rate negotiable</span>
+              )}
+              {p.source === "freelancer" || !p.source ? (
+                <span className="flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {p.bidCount} bids</span>
+              ) : null}
               <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {mounted ? ago(p.postedAt) : "…"}</span>
             </div>
 
@@ -218,7 +242,7 @@ export function ProjectFeed({
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
-                Bid on Freelancer <ExternalLink className="h-3.5 w-3.5" />
+                {sourceOf(p.source).cta} <ExternalLink className="h-3.5 w-3.5" />
               </a>
             </div>
 

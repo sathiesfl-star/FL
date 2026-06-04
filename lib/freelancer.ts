@@ -7,7 +7,12 @@
  *   FREELANCER_MODE=live            -> official API (needs FREELANCER_OAUTH_TOKEN).
  *
  * READ-ONLY. Never places bids — bidding stays manual on freelancer.com (ToS-safe design).
+ *
+ * In rss mode the feed is also enriched with overseas remote job boards
+ * (RemoteOK / WeWorkRemotely) via lib/jobboards.ts — see fetchJobBoards().
  */
+
+import { fetchJobBoards } from "./jobboards";
 
 export interface FreelancerProject {
   freelancerId: string;
@@ -22,6 +27,11 @@ export interface FreelancerProject {
   bidCount: number;
   sealed: boolean;
   postedAt: string; // ISO
+  /** Where this listing came from: "freelancer" (default) or an overseas job board. */
+  source?: string;
+  /** Optional client/company name + location, when the source provides it (job boards do). */
+  company?: string;
+  location?: string;
 }
 
 export function freelancerMode(): "mock" | "rss" | "live" {
@@ -122,15 +132,25 @@ async function rssProjects(params: SearchParams): Promise<FreelancerProject[]> {
     if (kw) urls.add(`${RSS_URL}?keyword=${encodeURIComponent(kw)}`);
   }
 
-  const results = await Promise.all([...urls].map(fetchFeed));
+  // Pull Freelancer feeds AND the overseas job boards (RemoteOK / WeWorkRemotely)
+  // in parallel, so an India-based agency sees international contract work too.
+  const [freelancerLists, jobBoardList] = await Promise.all([
+    Promise.all([...urls].map(fetchFeed)),
+    fetchJobBoards(terms),
+  ]);
 
   // Combine + dedupe by freelancerId, keep the newest.
   const byId = new Map<string, FreelancerProject>();
-  for (const list of results) {
+  for (const list of freelancerLists) {
     for (const p of list) {
       const existing = byId.get(p.freelancerId);
-      if (!existing || new Date(p.postedAt) > new Date(existing.postedAt)) byId.set(p.freelancerId, p);
+      if (!existing || new Date(p.postedAt) > new Date(existing.postedAt)) {
+        byId.set(p.freelancerId, { ...p, source: p.source ?? "freelancer" });
+      }
     }
+  }
+  for (const p of jobBoardList) {
+    if (!byId.has(p.freelancerId)) byId.set(p.freelancerId, p);
   }
   let items = [...byId.values()].sort((a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime());
 
