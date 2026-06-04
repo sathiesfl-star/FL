@@ -20,6 +20,8 @@ const SOURCES: Record<string, { label: string; cls: string; cta: string }> = {
   remotive: { label: "🌍 Remotive", cls: "bg-cyan-100 text-cyan-700", cta: "Apply on Remotive" },
   arbeitnow: { label: "🌍 Arbeitnow (EU)", cls: "bg-indigo-100 text-indigo-700", cta: "Apply on Arbeitnow" },
   wpjobs: { label: "📋 WordPress Jobs", cls: "bg-blue-100 text-blue-700", cta: "View on WordPress Jobs" },
+  jobicy: { label: "🌍 Jobicy (US)", cls: "bg-rose-100 text-rose-700", cta: "View on Jobicy" },
+  themuse: { label: "🌍 The Muse (US)", cls: "bg-fuchsia-100 text-fuchsia-700", cta: "View on The Muse" },
 };
 function sourceOf(src?: string) {
   return SOURCES[src ?? "freelancer"] ?? SOURCES.freelancer;
@@ -67,7 +69,8 @@ export function ProjectFeed({
   const [ai, setAi] = useState<Record<string, AiState>>({});
   const [copied, setCopied] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"fresh" | "fit" | "site">("fresh");
-  const [sourceFilter, setSourceFilter] = useState<"all" | "freelancer" | "overseas">("all");
+  // "all" | "overseas" | a specific source key (e.g. "freelancer", "wpjobs", "jobicy").
+  const [site, setSite] = useState<string>("all");
   const [usdOnly, setUsdOnly] = useState(false);
 
   const isOverseas = (p: ScoredProject) => !!p.source && p.source !== "freelancer";
@@ -76,9 +79,21 @@ export function ProjectFeed({
   const overseasCount = projects.filter(isOverseas).length;
   const usdCount = projects.filter(isUsd).length;
 
-  // Filter by source + (optionally) USD-only, then sort the result.
+  // Count projects per website (source) so the selector can show each site + its count.
+  const siteCounts = new Map<string, number>();
+  for (const p of projects) {
+    const s = p.source ?? "freelancer";
+    siteCounts.set(s, (siteCounts.get(s) ?? 0) + 1);
+  }
+  const sitesPresent = [...siteCounts.entries()].sort((a, b) => b[1] - a[1]);
+
+  // Filter by selected website + (optionally) USD-only, then sort the result.
   const visible = projects
-    .filter((p) => (sourceFilter === "all" ? true : sourceFilter === "overseas" ? isOverseas(p) : !isOverseas(p)))
+    .filter((p) => {
+      if (site === "all") return true;
+      if (site === "overseas") return isOverseas(p);
+      return (p.source ?? "freelancer") === site;
+    })
     .filter((p) => !usdOnly || isUsd(p));
   const sorted = [...visible].sort((a, b) => {
     if (sortBy === "fresh") return a.ageMinutes - b.ageMinutes;
@@ -140,22 +155,21 @@ export function ProjectFeed({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* Source filter */}
-          <div className="flex overflow-hidden rounded-lg border text-sm">
-            {([
-              ["all", `All (${projects.length})`],
-              ["freelancer", `Freelancer (${projects.length - overseasCount})`],
-              ["overseas", `Overseas 🌍 (${overseasCount})`],
-            ] as const).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setSourceFilter(key)}
-                className={`px-3 py-2 font-medium ${sourceFilter === key ? "bg-brand text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
-              >
-                {label}
-              </button>
+          {/* Website selector — pick a specific site (Freelancer, WordPress Jobs, Jobicy, …) */}
+          <select
+            value={site}
+            onChange={(e) => setSite(e.target.value)}
+            className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-brand"
+            title="Show projects from a specific website"
+          >
+            <option value="all">🗂️ All websites ({projects.length})</option>
+            <option value="overseas">🌍 Overseas only ({overseasCount})</option>
+            {sitesPresent.map(([key, count]) => (
+              <option key={key} value={key}>
+                {sourceOf(key).label} ({count})
+              </option>
             ))}
-          </div>
+          </select>
           {/* Sort toggle */}
           <div className="flex overflow-hidden rounded-lg border text-sm">
             <button
@@ -360,8 +374,8 @@ export function ProjectFeed({
 
         {sorted.length === 0 && keywordCount > 0 && !fetchError && (
           <div className="rounded-xl border bg-white p-8 text-center text-slate-500">
-            {sourceFilter === "overseas" && projects.length > 0
-              ? "No overseas listings matched your skills this round. Overseas job boards (RemoteOK / WeWorkRemotely) post less often than Freelancer — try Refresh, or check back later."
+            {site !== "all" && projects.length > 0
+              ? "No projects from this website matched your skills this round. These sites post less often than Freelancer — try another website, Refresh, or check back later."
               : "No matching projects right now. Try widening your Target Profile or refresh."}
           </div>
         )}

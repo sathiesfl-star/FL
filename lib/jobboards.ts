@@ -25,7 +25,7 @@ const HEADERS = {
  *  remotive + arbeitnow are JSON APIs that work from cloud servers (Vercel);
  *  remoteok's RSS is Cloudflare-protected and often blocked there. */
 export function enabledBoards(): string[] {
-  const raw = (process.env.JOB_BOARDS ?? "remoteok,weworkremotely,remotive,arbeitnow,wpjobs").toLowerCase().trim();
+  const raw = (process.env.JOB_BOARDS ?? "remoteok,weworkremotely,remotive,arbeitnow,wpjobs,jobicy,themuse").toLowerCase().trim();
   if (!raw || raw === "off" || raw === "none") return [];
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
@@ -45,6 +45,8 @@ export async function fetchJobBoards(keywords: string[] = []): Promise<Freelance
   if (boards.includes("remotive")) jobs.push(fetchRemotive());
   if (boards.includes("arbeitnow")) jobs.push(fetchArbeitnow());
   if (boards.includes("wpjobs")) jobs.push(fetchWordPressJobs());
+  if (boards.includes("jobicy")) jobs.push(fetchJobicy());
+  if (boards.includes("themuse")) jobs.push(fetchTheMuse());
 
   const results = await Promise.all(jobs);
 
@@ -290,6 +292,82 @@ async function fetchWordPressJobs(): Promise<FreelancerProject[]> {
       postedAt: pub ? safeDate(pub) : new Date().toISOString(),
       source: "wpjobs",
     });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Jobicy — JSON API with a USA geo filter. Cloud-friendly.
+// https://jobicy.com/api/v2/remote-jobs?geo=usa&industry=<ind>
+// ---------------------------------------------------------------------------
+
+const JOBICY_INDUSTRIES = ["dev", "design", "devops-sysadmin", "marketing"];
+
+async function fetchJobicy(): Promise<FreelancerProject[]> {
+  const lists = await Promise.all(
+    JOBICY_INDUSTRIES.map((ind) => jsonFetch(`https://jobicy.com/api/v2/remote-jobs?count=50&geo=usa&industry=${ind}`))
+  );
+  const out: FreelancerProject[] = [];
+  for (const data of lists) {
+    for (const j of (data?.jobs ?? []) as any[]) {
+      if (!j?.jobTitle || !j?.url) continue;
+      const company = String(j.companyName ?? "").trim();
+      out.push({
+        freelancerId: `jobicy-${j.id}`,
+        title: company ? `${j.jobTitle} — ${company}` : j.jobTitle,
+        description: stripHtml(String(j.jobDescription ?? j.jobExcerpt ?? "")).slice(0, 1500),
+        url: String(j.url),
+        skills: Array.isArray(j.jobIndustry) ? j.jobIndustry.map(String) : [],
+        currency: "USD",
+        projectType: "fixed",
+        bidCount: 0,
+        sealed: false,
+        postedAt: j.pubDate ? safeDate(String(j.pubDate)) : new Date().toISOString(),
+        source: "jobicy",
+        company: company || undefined,
+        location: j.jobGeo ? String(j.jobGeo) : undefined,
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// The Muse — JSON API, US company jobs. Cloud-friendly.
+// https://www.themuse.com/api/public/jobs?category=<cat>&page=1
+// ---------------------------------------------------------------------------
+
+const MUSE_CATEGORIES = ["Software Engineering", "Web Design", "Design and UX"];
+
+async function fetchTheMuse(): Promise<FreelancerProject[]> {
+  const lists = await Promise.all(
+    MUSE_CATEGORIES.map((c) => jsonFetch(`https://www.themuse.com/api/public/jobs?category=${encodeURIComponent(c)}&page=1`))
+  );
+  const out: FreelancerProject[] = [];
+  for (const data of lists) {
+    for (const r of (data?.results ?? []) as any[]) {
+      const url = r?.refs?.landing_page;
+      if (!r?.name || !url) continue;
+      const company = String(r.company?.name ?? "").trim();
+      const loc = Array.isArray(r.locations) && r.locations.length
+        ? r.locations.map((l: any) => l.name).filter(Boolean).join(", ")
+        : "";
+      out.push({
+        freelancerId: `themuse-${r.id}`,
+        title: company ? `${r.name} — ${company}` : r.name,
+        description: stripHtml(String(r.contents ?? "")).slice(0, 1500),
+        url: String(url),
+        skills: Array.isArray(r.categories) ? r.categories.map((c: any) => c.name).filter(Boolean) : [],
+        currency: "USD",
+        projectType: "fixed",
+        bidCount: 0,
+        sealed: false,
+        postedAt: r.publication_date ? safeDate(String(r.publication_date)) : new Date().toISOString(),
+        source: "themuse",
+        company: company || undefined,
+        location: loc || undefined,
+      });
+    }
   }
   return out;
 }
