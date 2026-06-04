@@ -1,0 +1,337 @@
+/**
+ * AI layer — provider-flexible (OpenAI or Anthropic), with a mock fallback.
+ *
+ * Provider chosen by env:
+ *   AI_PROVIDER=gemini     + GEMINI_API_KEY     -> Google Gemini (gemini-2.0-flash) — FREE tier
+ *   AI_PROVIDER=openai     + OPENAI_API_KEY     -> ChatGPT (gpt-4o-mini by default)
+ *   AI_PROVIDER=anthropic  + ANTHROPIC_API_KEY  -> Claude  (sonnet by default)
+ *   (auto-detect: if AI_PROVIDER unset, uses whichever key is present)
+ *   no key                 -> "mock" mode: deterministic sample output, zero cost.
+ *
+ * The agency profile (bio, tone, rules, winning proposals) is passed in — it lives in the DB
+ * and is editable from /settings, so proposals always use the latest.
+ */
+import type { FreelancerProject } from "./freelancer";
+import type { AgencyProfile } from "./agency-profile";
+
+type Provider = "openai" | "anthropic" | "gemini" | "mock";
+
+export function resolveProvider(): Provider {
+  const explicit = process.env.AI_PROVIDER as Provider | undefined;
+  if (explicit === "openai" && process.env.OPENAI_API_KEY) return "openai";
+  if (explicit === "anthropic" && process.env.ANTHROPIC_API_KEY) return "anthropic";
+  if (explicit === "gemini" && process.env.GEMINI_API_KEY) return "gemini";
+  // auto-detect
+  if (process.env.GEMINI_API_KEY) return "gemini";
+  if (process.env.OPENAI_API_KEY) return "openai";
+  if (process.env.ANTHROPIC_API_KEY) return "anthropic";
+  return "mock";
+}
+
+export function isAiLive(): boolean {
+  return resolveProvider() !== "mock";
+}
+
+export interface AiResult {
+  score: number; // 1-10
+  reasons: string[];
+  redFlags: string[];
+  proposal: string;
+}
+
+// ---------------------------------------------------------------------------
+// Prompt building
+// ---------------------------------------------------------------------------
+
+function systemPrompt(a: AgencyProfile): string {
+  const examples = a.winningProposals.length
+    ? `\n\nPast WINNING proposals from this agency — match their tone and structure:\n${a.winningProposals.map((p, i) => `--- Winning proposal ${i + 1} ---\n${p}`).join("\n\n")}`
+    : "";
+  const portfolio = a.pastProjects?.trim()
+    ? `\n\nPast projects this agency has delivered. When relevant to the client's project, reference 1–2 of these as proof — but ONLY mention ones genuinely related to the client's need. Never claim a project that isn't here:\n${a.pastProjects.trim()}`
+    : "";
+  return `You are the senior bid writer for "${a.name}", an IT outsourcing agency.
+About: ${a.oneLiner} (${a.site})
+Strengths:
+${a.strengths.map((s) => `- ${s}`).join("\n")}
+
+Tone: ${a.tone}
+
+Rules you MUST follow:
+${a.rules.map((r) => `- ${r}`).join("\n")}${portfolio}${examples}`;
+}
+
+function userPrompt(p: FreelancerProject): string {
+  return `Project on Freelancer.com:
+Title: ${p.title}
+Budget: ${p.budgetMin ?? "?"}–${p.budgetMax ?? "?"} ${p.currency} (${p.projectType})
+Existing bids: ${p.bidCount}
+Skills tagged: ${p.skills.join(", ") || "none"}
+Description:
+"""
+${p.description}
+"""
+
+Return STRICT JSON only:
+{"score": <1-10 int>, "reasons": [<short strings>], "redFlags": [<short strings, [] if none>], "proposal": "<90-150 word proposal following all rules>"}`;
+}
+
+// ---------------------------------------------------------------------------
+// Public entry
+// ---------------------------------------------------------------------------
+
+export async function scoreAndPropose(p: FreelancerProject, agency: AgencyProfile): Promise<AiResult> {
+  const provider = resolveProvider();
+  try {
+    if (provider === "openai") return parse(await callOpenAI(systemPrompt(agency), userPrompt(p)), p);
+    if (provider === "anthropic") return parse(await callAnthropic(systemPrompt(agency), userPrompt(p)), p);
+    if (provider === "gemini") return parse(await callGemini(systemPrompt(agency), userPrompt(p)), p);
+    return mockResult(p, agency);
+  } catch (err) {
+    const m = mockResult(p, agency);
+    m.redFlags = [...m.redFlags, `AI error: ${err instanceof Error ? err.message : "failed"}`];
+    return m;
+  }
+}
+
+/**
+ * Paste mode: write a proposal directly from a pasted project description.
+ * No Freelancer connection — the user copies a project from anywhere and pastes it here.
+ */
+export async function proposeFromText(description: string, agency: AgencyProfile): Promise<AiResult> {
+  const provider = resolveProvider();
+  const user = `A potential client posted this project. Write a winning bid proposal for it.
+
+Project description:
+"""
+${description}
+"""
+
+Return STRICT JSON only:
+{"score": <1-10 int how well it fits the agency>, "reasons": [<short strings>], "redFlags": [<short risk strings, [] if none>], "proposal": "<90-150 word proposal following all rules>"}`;
+
+  try {
+    if (provider === "openai") return parse(await callOpenAI(systemPrompt(agency), user), null);
+    if (provider === "anthropic") return parse(await callAnthropic(systemPrompt(agency), user), null);
+    if (provider === "gemini") return parse(await callGemini(systemPrompt(agency), user), null);
+    return mockFromText(description, agency);
+  } catch (err) {
+    const m = mockFromText(description, agency);
+    m.redFlags = [...m.redFlags, `AI error: ${err instanceof Error ? err.message : "failed"}`];
+    return m;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Full project document (for NDA / high-value bids) — a detailed multi-section doc.
+// ---------------------------------------------------------------------------
+
+export interface ProjectDoc {
+  title: string;
+  understanding: string; // our understanding of the client's need
+  solution: string; // proposed approach/solution
+  scope: string[]; // deliverables / scope items
+  techStack: string[];
+  phases: { name: string; detail: string }[]; // timeline phases
+  whyUs: string;
+  nextSteps: string;
+}
+
+export async function generateProjectDoc(description: string, agency: AgencyProfile): Promise<ProjectDoc> {
+  const provider = resolveProvider();
+  const user = `A potential client posted this project (may be high-value/NDA). Produce a DETAILED, professional project document we can send them.
+
+Project description:
+"""
+${description}
+"""
+
+Return STRICT JSON only with these keys:
+{
+  "title": "<a clear project title>",
+  "understanding": "<2-4 sentences showing we understand their need, referencing specifics>",
+  "solution": "<a paragraph describing our proposed approach/solution>",
+  "scope": ["<deliverable/scope item>", ...],
+  "techStack": ["<technology>", ...],
+  "phases": [{"name": "<phase name>", "detail": "<what happens, rough duration>"}, ...],
+  "whyUs": "<a paragraph on why this agency is the right choice>",
+  "nextSteps": "<1-2 sentences on how to proceed>"
+}`;
+
+  try {
+    let raw = "";
+    if (provider === "openai") raw = await callOpenAI(systemPrompt(agency), user);
+    else if (provider === "anthropic") raw = await callAnthropic(systemPrompt(agency), user);
+    else if (provider === "gemini") raw = await callGemini(systemPrompt(agency), user);
+    else return mockDoc(description, agency);
+
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) {
+      const j = JSON.parse(m[0]);
+      return {
+        title: String(j.title || "Project Proposal"),
+        understanding: String(j.understanding || ""),
+        solution: String(j.solution || ""),
+        scope: arr(j.scope),
+        techStack: arr(j.techStack),
+        phases: Array.isArray(j.phases) ? j.phases.map((p: any) => ({ name: String(p.name || ""), detail: String(p.detail || "") })) : [],
+        whyUs: String(j.whyUs || ""),
+        nextSteps: String(j.nextSteps || ""),
+      };
+    }
+    return mockDoc(description, agency);
+  } catch {
+    return mockDoc(description, agency);
+  }
+}
+
+function mockDoc(description: string, a: AgencyProfile): ProjectDoc {
+  return {
+    title: "Project Proposal",
+    understanding: `Based on your requirement ("${description.trim().slice(0, 80)}…"), you need a professionally delivered solution. [MOCK — add an AI key for a real detailed document.]`,
+    solution: `${a.name} will deliver this end to end, with clean code, clear communication, and on-time milestones.`,
+    scope: ["Discovery & scope finalization", "Design", "Development", "Testing & QA", "Deployment & handover"],
+    techStack: a.strengths.slice(0, 4),
+    phases: [
+      { name: "Phase 1 — Discovery", detail: "Finalize scope & designs (~1 week)" },
+      { name: "Phase 2 — Build", detail: "Core development (~2-3 weeks)" },
+      { name: "Phase 3 — Launch", detail: "Testing, deployment, handover (~1 week)" },
+    ],
+    whyUs: `${a.name}: ${a.oneLiner}`,
+    nextSteps: "Let's schedule a short call to confirm scope and timeline.",
+  };
+}
+
+function mockFromText(description: string, a: AgencyProfile): AiResult {
+  const short = description.trim().slice(0, 60);
+  return {
+    score: 7,
+    reasons: ["Matches agency skills"],
+    redFlags: /cheap|urgent!!!|low budget/i.test(description) ? ["Low-quality signal in description"] : [],
+    proposal: `Hi there — I read your requirement ("${short}…") and it's right in our wheelhouse. At ${a.name} we've delivered similar projects end to end, so we can move quickly and get the details right. I'd suggest a short call to lock the scope and timeline, then I'll share a clear plan with milestones. Could you tell me a bit more about your deadline and must-have features? — Team ${a.name}\n\n[MOCK — add a free Gemini key (AI_PROVIDER=gemini) for real AI proposals.]`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Providers
+// ---------------------------------------------------------------------------
+
+async function callOpenAI(system: string, user: string): Promise<string> {
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 800,
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content ?? "";
+}
+
+async function callGemini(system: string, user: string): Promise<string> {
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const key = process.env.GEMINI_API_KEY as string;
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: user }] }],
+        // thinkingBudget:0 disables Gemini 2.5's "thinking" phase (which otherwise eats the
+        // token budget and truncates the JSON). maxOutputTokens gives headroom for the proposal.
+        generationConfig: {
+          responseMimeType: "application/json",
+          maxOutputTokens: 2048,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
+      }),
+    }
+  );
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  const data = await res.json();
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+}
+
+async function callAnthropic(system: string, user: string): Promise<string> {
+  const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": process.env.ANTHROPIC_API_KEY as string,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 800,
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: user }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  const data = await res.json();
+  return data?.content?.[0]?.text ?? "";
+}
+
+// ---------------------------------------------------------------------------
+// Parse + mock
+// ---------------------------------------------------------------------------
+
+function parse(text: string, _p: FreelancerProject | null): AiResult {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      const j = JSON.parse(match[0]);
+      return {
+        score: clamp(j.score),
+        reasons: arr(j.reasons),
+        redFlags: arr(j.redFlags),
+        proposal: typeof j.proposal === "string" ? j.proposal.trim() : "",
+      };
+    } catch {
+      /* fall through to salvage */
+    }
+  }
+  // Salvage from truncated/malformed JSON: pull score + the proposal string by regex.
+  const scoreM = text.match(/"score"\s*:\s*(\d+)/);
+  const propM = text.match(/"proposal"\s*:\s*"([\s\S]*?)"\s*[},]/) || text.match(/"proposal"\s*:\s*"([\s\S]*)/);
+  let proposal = propM ? propM[1] : text.trim();
+  // Unescape common JSON sequences in the salvaged string.
+  proposal = proposal.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\").trim();
+  return {
+    score: scoreM ? clamp(scoreM[1]) : 6,
+    reasons: [],
+    redFlags: [],
+    proposal,
+  };
+}
+
+const clamp = (n: any) => Math.max(1, Math.min(10, Math.round(Number(n) || 5)));
+const arr = (x: any): string[] => (Array.isArray(x) ? x.filter((s) => typeof s === "string") : []);
+
+function mockResult(p: FreelancerProject, a: AgencyProfile): AiResult {
+  const budget = p.budgetMax ?? p.budgetMin ?? 0;
+  let score = 6;
+  if (budget >= 1000) score += 2;
+  if (p.bidCount <= 10) score += 1;
+  if (/cheap|urgent!!!|low budget/i.test(p.title + p.description)) score -= 3;
+  score = Math.max(1, Math.min(10, score));
+  const reasons = [
+    budget >= 1000 ? "Healthy budget" : "Modest budget",
+    p.bidCount <= 10 ? "Low competition" : `${p.bidCount} bids already`,
+    "Matches agency skills",
+  ];
+  const redFlags = /cheap|urgent!!!/i.test(p.title + p.description) ? ["Low-quality signal in description"] : [];
+  const proposal = `Hi there — I read through your "${p.title}" requirement and this is squarely in our wheelhouse. At ${a.name} we've delivered similar ${p.skills[0] ?? "web"} projects end to end, so we can move fast and get the details right. I'd suggest a quick call to lock the scope and timeline, then I'll share a clear plan and milestones. Could you tell me a bit more about your deadline and must-have features? — Team ${a.name}\n\n[MOCK proposal — add an OpenAI or Anthropic API key for real AI-written proposals.]`;
+  return { score, reasons, redFlags, proposal };
+}
