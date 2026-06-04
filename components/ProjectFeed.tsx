@@ -273,7 +273,9 @@ export function ProjectFeed({
             )}
 
             <div className="mt-3 flex items-center justify-end gap-2">
-              {!ai[p.freelancerId]?.proposal && (
+              {/* Proposals are only for Freelancer.com bids. For job portals the team applies
+                  manually on the source site, so we just show the "Apply on …" link. */}
+              {(!p.source || p.source === "freelancer") && !ai[p.freelancerId]?.proposal && (
                 <button
                   onClick={() => generate(p)}
                   disabled={ai[p.freelancerId]?.loading}
