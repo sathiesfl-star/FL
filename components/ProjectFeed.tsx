@@ -33,6 +33,7 @@ interface AiState {
 
 function ago(iso: string): string {
   const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (min <= 0) return "just now"; // guard against future-dated feed timestamps
   if (min < 60) return `${min}m ago`;
   const h = Math.floor(min / 60);
   if (h < 24) return `${h}h ago`;
@@ -63,13 +64,19 @@ export function ProjectFeed({
   const [ai, setAi] = useState<Record<string, AiState>>({});
   const [copied, setCopied] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"fresh" | "fit">("fresh");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "freelancer" | "overseas">("all");
 
-  // Sort a copy by the chosen key (freshest = smallest age; best fit = highest score).
-  const sorted = [...projects].sort((a, b) =>
+  const isOverseas = (p: ScoredProject) => !!p.source && p.source !== "freelancer";
+  const primeCount = projects.filter((p) => p.freshness === "prime").length;
+  const overseasCount = projects.filter(isOverseas).length;
+
+  // Filter by source, then sort the result (freshest = smallest age; best fit = highest score).
+  const visible = projects.filter((p) =>
+    sourceFilter === "all" ? true : sourceFilter === "overseas" ? isOverseas(p) : !isOverseas(p)
+  );
+  const sorted = [...visible].sort((a, b) =>
     sortBy === "fresh" ? a.ageMinutes - b.ageMinutes : b.matchScore - a.matchScore
   );
-  const primeCount = projects.filter((p) => p.freshness === "prime").length;
-  const overseasCount = projects.filter((p) => p.source && p.source !== "freelancer").length;
   // Relative timestamps are computed client-side only, to avoid a server/client
   // hydration mismatch when a minute ticks over between render passes.
   const [mounted, setMounted] = useState(false);
@@ -120,7 +127,23 @@ export function ProjectFeed({
             <span className={mode === "mock" ? "text-amber-600" : "text-emerald-600"}>{mode} mode</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Source filter */}
+          <div className="flex overflow-hidden rounded-lg border text-sm">
+            {([
+              ["all", `All (${projects.length})`],
+              ["freelancer", `Freelancer (${projects.length - overseasCount})`],
+              ["overseas", `Overseas 🌍 (${overseasCount})`],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setSourceFilter(key)}
+                className={`px-3 py-2 font-medium ${sourceFilter === key ? "bg-brand text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {/* Sort toggle */}
           <div className="flex overflow-hidden rounded-lg border text-sm">
             <button
@@ -288,9 +311,11 @@ export function ProjectFeed({
           </div>
         ))}
 
-        {projects.length === 0 && keywordCount > 0 && !fetchError && (
+        {sorted.length === 0 && keywordCount > 0 && !fetchError && (
           <div className="rounded-xl border bg-white p-8 text-center text-slate-500">
-            No matching projects right now. Try widening your Target Profile or refresh.
+            {sourceFilter === "overseas" && projects.length > 0
+              ? "No overseas listings matched your skills this round. Overseas job boards (RemoteOK / WeWorkRemotely) post less often than Freelancer — try Refresh, or check back later."
+              : "No matching projects right now. Try widening your Target Profile or refresh."}
           </div>
         )}
       </div>
