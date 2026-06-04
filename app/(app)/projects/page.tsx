@@ -1,7 +1,7 @@
 import { getActiveProfile } from "@/lib/account";
 import { searchActiveProjects, freelancerMode } from "@/lib/freelancer";
 import { scoreProject, passesProfile, type ProfileFilter } from "@/lib/relevance";
-import { matchKeywordsFor } from "@/lib/skills";
+import { matchKeywordsFor, skillByKey } from "@/lib/skills";
 import { ProjectFeed } from "@/components/ProjectFeed";
 
 export const dynamic = "force-dynamic";
@@ -16,12 +16,16 @@ export default async function ProjectsPage() {
     avoid: profile.avoid,
   };
 
-  // Fetch active projects (mock unless FREELANCER_MODE=live). Query by the profile's keywords.
+  // Fetch active projects. In RSS mode we pull a keyword feed per selected skill (label),
+  // combine + dedupe, to get many more relevant projects than the single "latest" feed.
   const keywords = matchKeywordsFor(profile.skills);
+  const feedKeywords = profile.skills
+    .map((k) => skillByKey(k)?.label.split(" ")[0]) // first word of each skill label, e.g. "WordPress"
+    .filter((s): s is string => !!s);
   let fetchError: string | null = null;
   let raw: Awaited<ReturnType<typeof searchActiveProjects>> = [];
   try {
-    raw = await searchActiveProjects({ query: undefined, limit: 60 });
+    raw = await searchActiveProjects({ keywords: feedKeywords, limit: 120 });
   } catch (e) {
     fetchError = e instanceof Error ? e.message : "Fetch failed";
   }

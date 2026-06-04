@@ -38,6 +38,7 @@ export function isLiveMode(): boolean {
 export interface SearchParams {
   query?: string; // keyword search
   limit?: number;
+  keywords?: string[]; // for RSS mode: fetch a keyword feed per term, combine + dedupe
 }
 
 export async function searchActiveProjects(params: SearchParams): Promise<FreelancerProject[]> {
@@ -96,24 +97,46 @@ function mapApiProjects(raw: any[]): FreelancerProject[] {
 // ---------------------------------------------------------------------------
 
 const RSS_URL = process.env.FREELANCER_RSS_URL || "https://www.freelancer.com/rss.xml";
+const RSS_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+  Accept: "application/rss+xml, application/xml, text/xml",
+};
+
+async function fetchFeed(url: string): Promise<FreelancerProject[]> {
+  try {
+    const res = await fetch(url, { headers: RSS_HEADERS, cache: "no-store" });
+    if (!res.ok) return [];
+    return parseRssItems(await res.text());
+  } catch {
+    return [];
+  }
+}
 
 async function rssProjects(params: SearchParams): Promise<FreelancerProject[]> {
-  const res = await fetch(RSS_URL, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
-      Accept: "application/rss+xml, application/xml, text/xml",
-    },
-    // Always fetch fresh listings.
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`Freelancer RSS error ${res.status}`);
-  const xml = await res.text();
-  const items = parseRssItems(xml);
+  // Build the list of feeds to pull. When the profile has search terms, fetch a
+  // per-keyword feed for each (more relevant volume); always include the latest feed too.
+  const terms = (params.keywords ?? []).slice(0, 12); // cap the number of parallel feeds
+  const urls = new Set<string>([RSS_URL]);
+  for (const t of terms) {
+    const kw = t.trim();
+    if (kw) urls.add(`${RSS_URL}?keyword=${encodeURIComponent(kw)}`);
+  }
+
+  const results = await Promise.all([...urls].map(fetchFeed));
+
+  // Combine + dedupe by freelancerId, keep the newest.
+  const byId = new Map<string, FreelancerProject>();
+  for (const list of results) {
+    for (const p of list) {
+      const existing = byId.get(p.freelancerId);
+      if (!existing || new Date(p.postedAt) > new Date(existing.postedAt)) byId.set(p.freelancerId, p);
+    }
+  }
+  let items = [...byId.values()].sort((a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime());
+
   const q = params.query?.toLowerCase();
-  const filtered = q
-    ? items.filter((p) => (p.title + p.description + p.skills.join(" ")).toLowerCase().includes(q))
-    : items;
-  return filtered.slice(0, params.limit ?? 60);
+  if (q) items = items.filter((p) => (p.title + p.description + p.skills.join(" ")).toLowerCase().includes(q));
+  return items.slice(0, params.limit ?? 80);
 }
 
 /** Minimal, dependency-free RSS parser tailored to Freelancer's feed shape. */
@@ -185,6 +208,12 @@ function decodeXml(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
+    .replace(/&ndash;/g, "–")
+    .replace(/&mdash;/g, "—")
+    .replace(/&rsquo;/g, "'")
+    .replace(/&lsquo;/g, "'")
+    .replace(/&hellip;/g, "…")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
     .trim();
 }
 
