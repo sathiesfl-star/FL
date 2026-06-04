@@ -6,11 +6,30 @@
 import type { FreelancerProject } from "./freelancer";
 import { matchKeywordsFor } from "./skills";
 
+export type FreshnessTier = "prime" | "good" | "ok" | "late";
+
 export interface ScoredProject extends FreelancerProject {
   matchScore: number; // 0-100
   matchedSkills: string[];
   redFlags: string[];
   belowBudget: boolean;
+  ageMinutes: number;
+  freshness: FreshnessTier;
+}
+
+/**
+ * Bid-timing tiers. Bidding while a project is fresh is the most controllable way to
+ * rank higher (fewer competing bids, and recent bids surface near the top).
+ *   prime: < 30 min  — bid NOW, you can be in the first wave
+ *   good : < 2 hours — still early, worth bidding promptly
+ *   ok   : < 6 hours — bidding window open but filling up
+ *   late : older     — likely buried; only bid if a strong fit
+ */
+export function freshnessOf(ageMinutes: number): FreshnessTier {
+  if (ageMinutes < 30) return "prime";
+  if (ageMinutes < 120) return "good";
+  if (ageMinutes < 360) return "ok";
+  return "late";
 }
 
 export interface ProfileFilter {
@@ -49,12 +68,15 @@ export function scoreProject(p: FreelancerProject, profile: ProfileFilter): Scor
   if (ageMin <= 30) score += 5; // fresh
   score -= redFlags.length * 12;
 
+  const ageMinutes = Math.max(0, Math.round(ageMin));
   return {
     ...p,
     matchScore: Math.max(0, Math.min(100, Math.round(score))),
     matchedSkills: [...matched],
     redFlags,
     belowBudget,
+    ageMinutes,
+    freshness: freshnessOf(ageMinutes),
   };
 }
 
