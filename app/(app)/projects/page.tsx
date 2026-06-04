@@ -1,5 +1,5 @@
 import { getActiveProfile } from "@/lib/account";
-import { searchActiveProjects, isLiveMode } from "@/lib/freelancer";
+import { searchActiveProjects, freelancerMode } from "@/lib/freelancer";
 import { scoreProject, passesProfile, type ProfileFilter } from "@/lib/relevance";
 import { matchKeywordsFor } from "@/lib/skills";
 import { ProjectFeed } from "@/components/ProjectFeed";
@@ -34,7 +34,7 @@ export default async function ProjectsPage() {
   return (
     <ProjectFeed
       projects={scored}
-      mode={isLiveMode() ? "live" : "mock"}
+      mode={freelancerMode()}
       profileSkillCount={profile.skills.length}
       keywordCount={keywords.length}
       fetchError={fetchError}

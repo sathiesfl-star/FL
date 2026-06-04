@@ -40,7 +40,7 @@ export function Sidebar({ accountName, mode }: { accountName: string; mode: stri
         <div className="text-xs text-slate-400">
           <div className="font-medium text-slate-600">{accountName}</div>
           <div className="mt-0.5">
-            Freelancer: <span className={mode === "live" ? "text-emerald-600" : "text-amber-600"}>{mode}</span>
+            Freelancer: <span className={mode === "mock" ? "text-amber-600" : "text-emerald-600"}>{mode}</span>
           </div>
         </div>
         <button

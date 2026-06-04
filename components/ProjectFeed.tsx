@@ -91,7 +91,7 @@ export function ProjectFeed({
           <h1 className="text-2xl font-bold text-slate-900">Project Feed</h1>
           <p className="text-sm text-slate-500">
             {projects.length} matching projects · {profileSkillCount} skills targeted ·{" "}
-            <span className={mode === "live" ? "text-emerald-600" : "text-amber-600"}>{mode} mode</span>
+            <span className={mode === "mock" ? "text-amber-600" : "text-emerald-600"}>{mode} mode</span>
           </p>
         </div>
         <button
@@ -105,7 +105,7 @@ export function ProjectFeed({
 
       {mode === "mock" && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
-          Showing sample projects. Add your Freelancer API token and set <code>FREELANCER_MODE=live</code> to pull real projects.
+          Showing sample projects. Set <code>FREELANCER_MODE=rss</code> to pull real projects from the public Freelancer feed (no token needed).
         </div>
       )}
       {fetchError && (

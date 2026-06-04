@@ -1,13 +1,12 @@
 /**
- * Freelancer.com API client.
+ * Freelancer.com project reader.
  *
- *   FREELANCER_MODE=mock  (default) -> returns sample projects, no network. Build/demo with no token.
- *   FREELANCER_MODE=live            -> calls the official API:
- *        GET {base}/projects/0.1/projects/active   (search active projects)
- *      with header  Freelancer-OAuth-V1: <token>
+ *   FREELANCER_MODE=mock  (default) -> sample projects, no network.
+ *   FREELANCER_MODE=rss             -> reads the PUBLIC RSS feed (no token, no account risk,
+ *                                       fully allowed). https://www.freelancer.com/rss.xml
+ *   FREELANCER_MODE=live            -> official API (needs FREELANCER_OAUTH_TOKEN).
  *
- * READ-ONLY. This client never places bids — bidding stays manual on freelancer.com
- * (prep-only co-pilot, the ToS-safe design).
+ * READ-ONLY. Never places bids — bidding stays manual on freelancer.com (ToS-safe design).
  */
 
 export interface FreelancerProject {
@@ -25,8 +24,15 @@ export interface FreelancerProject {
   postedAt: string; // ISO
 }
 
+export function freelancerMode(): "mock" | "rss" | "live" {
+  const m = process.env.FREELANCER_MODE;
+  if (m === "rss") return "rss";
+  if (m === "live") return "live";
+  return "mock";
+}
+
 export function isLiveMode(): boolean {
-  return process.env.FREELANCER_MODE === "live";
+  return freelancerMode() !== "mock";
 }
 
 export interface SearchParams {
@@ -35,7 +41,10 @@ export interface SearchParams {
 }
 
 export async function searchActiveProjects(params: SearchParams): Promise<FreelancerProject[]> {
-  if (!isLiveMode()) return mockProjects(params);
+  const mode = freelancerMode();
+  if (mode === "mock") return mockProjects(params);
+  if (mode === "rss") return rssProjects(params);
+  // mode === "live" -> official API below
 
   const token = process.env.FREELANCER_OAUTH_TOKEN;
   if (!token) throw new Error("FREELANCER_MODE=live but FREELANCER_OAUTH_TOKEN is not set.");
@@ -80,6 +89,103 @@ function mapApiProjects(raw: any[]): FreelancerProject[] {
       postedAt: p.submitdate ? new Date(p.submitdate * 1000).toISOString() : new Date().toISOString(),
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// RSS — read the PUBLIC Freelancer feed (no token, no account risk, ToS-safe).
+// ---------------------------------------------------------------------------
+
+const RSS_URL = process.env.FREELANCER_RSS_URL || "https://www.freelancer.com/rss.xml";
+
+async function rssProjects(params: SearchParams): Promise<FreelancerProject[]> {
+  const res = await fetch(RSS_URL, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+      Accept: "application/rss+xml, application/xml, text/xml",
+    },
+    // Always fetch fresh listings.
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Freelancer RSS error ${res.status}`);
+  const xml = await res.text();
+  const items = parseRssItems(xml);
+  const q = params.query?.toLowerCase();
+  const filtered = q
+    ? items.filter((p) => (p.title + p.description + p.skills.join(" ")).toLowerCase().includes(q))
+    : items;
+  return filtered.slice(0, params.limit ?? 60);
+}
+
+/** Minimal, dependency-free RSS parser tailored to Freelancer's feed shape. */
+function parseRssItems(xml: string): FreelancerProject[] {
+  const out: FreelancerProject[] = [];
+  const itemBlocks = xml.split(/<item>/i).slice(1);
+  for (const block of itemBlocks) {
+    const body = block.split(/<\/item>/i)[0];
+    const title = decodeXml(pick(body, "title"));
+    const link = pick(body, "link").trim();
+    const description = decodeXml(pick(body, "description"));
+    const pub = pick(body, "pubDate").trim();
+    const guid = pick(body, "guid");
+    if (!title || !link) continue;
+
+    // Skills come from <category> tags.
+    const skills = [...body.matchAll(/<category[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/category>/gi)]
+      .map((m) => decodeXml(m[1]).trim())
+      .filter(Boolean);
+
+    // Budget + type are embedded in the description, e.g. "(Budget: $2 - $8 USD, Jobs: ...)".
+    const { budgetMin, budgetMax, currency, projectType } = parseBudget(description);
+
+    const id = (guid.match(/(\d+)/)?.[1]) || link.match(/(\d+)\.html/)?.[1] || link;
+
+    out.push({
+      freelancerId: `rss-${id}`,
+      title,
+      // Strip the trailing "(Budget: ...)" so the description reads cleanly.
+      description: description.replace(/\(Budget:[\s\S]*\)$/i, "").trim(),
+      url: link,
+      skills,
+      budgetMin,
+      budgetMax,
+      currency,
+      projectType,
+      bidCount: 0, // RSS doesn't provide bid count
+      sealed: false,
+      postedAt: pub ? new Date(pub).toISOString() : new Date().toISOString(),
+    });
+  }
+  return out;
+}
+
+function pick(block: string, tag: string): string {
+  const m = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  if (!m) return "";
+  return m[1].replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
+}
+
+function parseBudget(desc: string): { budgetMin?: number; budgetMax?: number; currency: string; projectType: "fixed" | "hourly" } {
+  // "(Budget: $250 - $750 USD" or "(Budget: ₹600 - ₹1500 INR"  · "/ hr" => hourly
+  const m = desc.match(/Budget:\s*[^\d]*([\d,]+)\s*-\s*[^\d]*([\d,]+)\s*([A-Z]{3})/i);
+  const hourly = /\/\s*hr|per hour|hourly/i.test(desc);
+  const currency = m?.[3]?.toUpperCase() || "USD";
+  return {
+    budgetMin: m ? Number(m[1].replace(/,/g, "")) : undefined,
+    budgetMax: m ? Number(m[2].replace(/,/g, "")) : undefined,
+    currency,
+    projectType: hourly ? "hourly" : "fixed",
+  };
+}
+
+function decodeXml(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .trim();
 }
 
 // ---------------------------------------------------------------------------
