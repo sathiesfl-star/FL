@@ -139,24 +139,34 @@ async function rssProjects(params: SearchParams): Promise<FreelancerProject[]> {
     fetchJobBoards(terms),
   ]);
 
-  // Combine + dedupe by freelancerId, keep the newest.
-  const byId = new Map<string, FreelancerProject>();
+  // Dedupe Freelancer items (keep newest), then date-cap THEM only. Freelancer's RSS
+  // is minute-fresh while job posts are dated hours/days old, so a single combined
+  // date-sort+slice would starve the overseas boards. We cap Freelancer by recency,
+  // then let ALL job-board items through to the caller's relevance filter.
+  const limit = params.limit ?? 80;
+  const flById = new Map<string, FreelancerProject>();
   for (const list of freelancerLists) {
     for (const p of list) {
-      const existing = byId.get(p.freelancerId);
+      const existing = flById.get(p.freelancerId);
       if (!existing || new Date(p.postedAt) > new Date(existing.postedAt)) {
-        byId.set(p.freelancerId, { ...p, source: p.source ?? "freelancer" });
+        flById.set(p.freelancerId, { ...p, source: p.source ?? "freelancer" });
       }
     }
   }
-  for (const p of jobBoardList) {
-    if (!byId.has(p.freelancerId)) byId.set(p.freelancerId, p);
-  }
+  const freelancerItems = [...flById.values()]
+    .sort((a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime())
+    .slice(0, limit);
+
+  // Merge: capped Freelancer + all (already-deduped) job-board items.
+  const byId = new Map<string, FreelancerProject>();
+  for (const p of freelancerItems) byId.set(p.freelancerId, p);
+  for (const p of jobBoardList) if (!byId.has(p.freelancerId)) byId.set(p.freelancerId, p);
+
   let items = [...byId.values()].sort((a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime());
 
   const q = params.query?.toLowerCase();
   if (q) items = items.filter((p) => (p.title + p.description + p.skills.join(" ")).toLowerCase().includes(q));
-  return items.slice(0, params.limit ?? 80);
+  return items;
 }
 
 /** Minimal, dependency-free RSS parser tailored to Freelancer's feed shape. */
