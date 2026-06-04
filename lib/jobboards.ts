@@ -21,9 +21,11 @@ const HEADERS = {
   Accept: "application/rss+xml, application/xml, text/xml",
 };
 
-/** Which boards are enabled. Default: both. JOB_BOARDS=off disables all. */
+/** Which boards are enabled. Default: all. JOB_BOARDS=off disables all.
+ *  remotive + arbeitnow are JSON APIs that work from cloud servers (Vercel);
+ *  remoteok's RSS is Cloudflare-protected and often blocked there. */
 export function enabledBoards(): string[] {
-  const raw = (process.env.JOB_BOARDS ?? "remoteok,weworkremotely").toLowerCase().trim();
+  const raw = (process.env.JOB_BOARDS ?? "remoteok,weworkremotely,remotive,arbeitnow").toLowerCase().trim();
   if (!raw || raw === "off" || raw === "none") return [];
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
@@ -40,6 +42,8 @@ export async function fetchJobBoards(keywords: string[] = []): Promise<Freelance
   const jobs: Promise<FreelancerProject[]>[] = [];
   if (boards.includes("remoteok")) jobs.push(fetchRemoteOK(keywords));
   if (boards.includes("weworkremotely")) jobs.push(fetchWeWorkRemotely());
+  if (boards.includes("remotive")) jobs.push(fetchRemotive());
+  if (boards.includes("arbeitnow")) jobs.push(fetchArbeitnow());
 
   const results = await Promise.all(jobs);
 
@@ -179,6 +183,86 @@ function parseWWR(xml: string): FreelancerProject[] {
     });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Remotive — JSON API. Cloud-friendly (works on Vercel, unlike RemoteOK).
+// https://remotive.com/api/remote-jobs?category=<cat>
+// We link back to the original posting (Remotive's API terms ask for this).
+// ---------------------------------------------------------------------------
+
+const REMOTIVE_CATEGORIES = ["software-dev", "design", "devops"];
+
+async function fetchRemotive(): Promise<FreelancerProject[]> {
+  const lists = await Promise.all(
+    REMOTIVE_CATEGORIES.map((c) => jsonFetch(`https://remotive.com/api/remote-jobs?category=${c}`))
+  );
+  const out: FreelancerProject[] = [];
+  for (const data of lists) {
+    for (const j of (data?.jobs ?? []) as any[]) {
+      if (!j?.title || !j?.url) continue;
+      const company = String(j.company_name ?? "").trim();
+      out.push({
+        freelancerId: `remotive-${j.id}`,
+        title: company ? `${j.title} — ${company}` : j.title,
+        description: stripHtml(String(j.description ?? "")).slice(0, 1500),
+        url: String(j.url),
+        skills: Array.isArray(j.tags) ? j.tags.map(String) : [],
+        currency: "USD",
+        projectType: "fixed",
+        bidCount: 0,
+        sealed: false,
+        postedAt: j.publication_date ? safeDate(String(j.publication_date)) : new Date().toISOString(),
+        source: "remotive",
+        company: company || undefined,
+        location: j.candidate_required_location ? String(j.candidate_required_location) : undefined,
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Arbeitnow — JSON API, EU-friendly, open. Cloud-friendly.
+// https://www.arbeitnow.com/api/job-board-api  (one page; mixed roles)
+// Mostly EU/Germany full-time — the skill gate filters it down to dev/web.
+// ---------------------------------------------------------------------------
+
+async function fetchArbeitnow(): Promise<FreelancerProject[]> {
+  const data = await jsonFetch("https://www.arbeitnow.com/api/job-board-api");
+  const out: FreelancerProject[] = [];
+  for (const j of (data?.data ?? []) as any[]) {
+    if (!j?.title || !j?.url) continue;
+    const company = String(j.company_name ?? "").trim();
+    const tags = Array.isArray(j.tags) ? j.tags.map(String) : [];
+    const types = Array.isArray(j.job_types) ? j.job_types.map(String) : [];
+    out.push({
+      freelancerId: `arbeitnow-${j.slug}`,
+      title: company ? `${j.title} — ${company}` : j.title,
+      description: stripHtml(String(j.description ?? "")).slice(0, 1500),
+      url: String(j.url),
+      skills: [...tags, ...types],
+      currency: "EUR",
+      projectType: "fixed",
+      bidCount: 0,
+      sealed: false,
+      postedAt: j.created_at ? new Date(Number(j.created_at) * 1000).toISOString() : new Date().toISOString(),
+      source: "arbeitnow",
+      company: company || undefined,
+      location: j.location ? String(j.location) : (j.remote ? "Remote" : undefined),
+    });
+  }
+  return out;
+}
+
+async function jsonFetch(url: string): Promise<any> {
+  try {
+    const res = await fetch(url, { headers: { ...HEADERS, Accept: "application/json" }, cache: "no-store" });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,8 @@ const SOURCES: Record<string, { label: string; cls: string; cta: string }> = {
   freelancer: { label: "Freelancer", cls: "bg-violet-100 text-violet-700", cta: "Bid on Freelancer" },
   remoteok: { label: "🌍 RemoteOK", cls: "bg-sky-100 text-sky-700", cta: "Apply on RemoteOK" },
   weworkremotely: { label: "🌍 WeWorkRemotely", cls: "bg-teal-100 text-teal-700", cta: "Apply on WeWorkRemotely" },
+  remotive: { label: "🌍 Remotive", cls: "bg-cyan-100 text-cyan-700", cta: "Apply on Remotive" },
+  arbeitnow: { label: "🌍 Arbeitnow (EU)", cls: "bg-indigo-100 text-indigo-700", cta: "Apply on Arbeitnow" },
 };
 function sourceOf(src?: string) {
   return SOURCES[src ?? "freelancer"] ?? SOURCES.freelancer;
