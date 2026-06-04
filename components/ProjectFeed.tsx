@@ -65,20 +65,25 @@ export function ProjectFeed({
   const [refreshing, setRefreshing] = useState(false);
   const [ai, setAi] = useState<Record<string, AiState>>({});
   const [copied, setCopied] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<"fresh" | "fit">("fresh");
+  const [sortBy, setSortBy] = useState<"fresh" | "fit" | "site">("fresh");
   const [sourceFilter, setSourceFilter] = useState<"all" | "freelancer" | "overseas">("all");
 
   const isOverseas = (p: ScoredProject) => !!p.source && p.source !== "freelancer";
   const primeCount = projects.filter((p) => p.freshness === "prime").length;
   const overseasCount = projects.filter(isOverseas).length;
 
-  // Filter by source, then sort the result (freshest = smallest age; best fit = highest score).
+  // Filter by source, then sort the result.
   const visible = projects.filter((p) =>
     sourceFilter === "all" ? true : sourceFilter === "overseas" ? isOverseas(p) : !isOverseas(p)
   );
-  const sorted = [...visible].sort((a, b) =>
-    sortBy === "fresh" ? a.ageMinutes - b.ageMinutes : b.matchScore - a.matchScore
-  );
+  const sorted = [...visible].sort((a, b) => {
+    if (sortBy === "fresh") return a.ageMinutes - b.ageMinutes;
+    if (sortBy === "fit") return b.matchScore - a.matchScore;
+    // "site": group by source/website (alphabetical), best fit first within each.
+    const sa = a.source ?? "freelancer";
+    const sb = b.source ?? "freelancer";
+    return sa === sb ? b.matchScore - a.matchScore : sa.localeCompare(sb);
+  });
   // Relative timestamps are computed client-side only, to avoid a server/client
   // hydration mismatch when a minute ticks over between render passes.
   const [mounted, setMounted] = useState(false);
@@ -159,6 +164,12 @@ export function ProjectFeed({
               className={`px-3 py-2 font-medium ${sortBy === "fit" ? "bg-brand text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
             >
               Best fit
+            </button>
+            <button
+              onClick={() => setSortBy("site")}
+              className={`px-3 py-2 font-medium ${sortBy === "site" ? "bg-brand text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+            >
+              By website
             </button>
           </div>
           <button
