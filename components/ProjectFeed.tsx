@@ -67,15 +67,18 @@ export function ProjectFeed({
   const [copied, setCopied] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"fresh" | "fit" | "site">("fresh");
   const [sourceFilter, setSourceFilter] = useState<"all" | "freelancer" | "overseas">("all");
+  const [usdOnly, setUsdOnly] = useState(false);
 
   const isOverseas = (p: ScoredProject) => !!p.source && p.source !== "freelancer";
+  const isUsd = (p: ScoredProject) => (p.currency || "").toUpperCase() === "USD";
   const primeCount = projects.filter((p) => p.freshness === "prime").length;
   const overseasCount = projects.filter(isOverseas).length;
+  const usdCount = projects.filter(isUsd).length;
 
-  // Filter by source, then sort the result.
-  const visible = projects.filter((p) =>
-    sourceFilter === "all" ? true : sourceFilter === "overseas" ? isOverseas(p) : !isOverseas(p)
-  );
+  // Filter by source + (optionally) USD-only, then sort the result.
+  const visible = projects
+    .filter((p) => (sourceFilter === "all" ? true : sourceFilter === "overseas" ? isOverseas(p) : !isOverseas(p)))
+    .filter((p) => !usdOnly || isUsd(p));
   const sorted = [...visible].sort((a, b) => {
     if (sortBy === "fresh") return a.ageMinutes - b.ageMinutes;
     if (sortBy === "fit") return b.matchScore - a.matchScore;
@@ -172,6 +175,14 @@ export function ProjectFeed({
               By website
             </button>
           </div>
+          {/* USD-only quick filter — surfaces US / Western clients, hides low-budget local-currency posts. */}
+          <button
+            onClick={() => setUsdOnly((v) => !v)}
+            title="Show only projects priced in USD — US & international clients, hides low-budget local-currency posts."
+            className={`rounded-lg border px-3 py-2 text-sm font-medium ${usdOnly ? "border-emerald-400 bg-emerald-50 text-emerald-700" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+          >
+            {usdOnly ? "✓ " : ""}💵 USD only ({usdCount})
+          </button>
           <button
             onClick={refresh}
             disabled={refreshing}
