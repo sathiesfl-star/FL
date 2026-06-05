@@ -77,6 +77,7 @@ STRUCTURE
 - LENGTH: the finished proposal MUST be 100–125 words. Count as you write. Models tend to undershoot — if your draft is under 100 words, EXPAND the understanding sentence and each bullet (more specifics) until it reaches 100+. Never submit under 90.
 - Required parts, in order: (1) the short opener line, (2) 1–2 sentences showing you understood their specific need, (3) 2–3 method bullets, (4) ONE sentence of honest relevant proof, (5) the closing question, (6) "Thanks, ${BID_AUTHOR}".
 - Each method bullet must be a full, specific phrase (8–14 words) naming the actual step and tool — not 3-word fragments.
+- FORMATTING: put each method bullet on its OWN line, starting with "- " (hyphen + space), with a real line break (\\n) between bullets. NEVER write bullets inline or join them with commas. There should also be a blank line before the first bullet and after the last.
 - Include ONE sentence of credible proof: a specific relevant experience or result that fits their need (honest — never invented).
 - Keep sentences clear and readable; use 2–3 bullets for the method. Avoid one giant block of text.
 - Mention only 1–2 relevant skills or past projects that fit their need — never list all services.
@@ -151,7 +152,7 @@ async function ensureLength(result: AiResult, provider: Provider, agency: Agency
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!result.proposal || wordCount(result.proposal) >= 90) break;
     const wc = wordCount(result.proposal);
-    const user = `The proposal below is only ${wc} words — too short. Rewrite it to 115–130 words, keeping the SAME opener style, the method bullets, the honest proof sentence, the closing question, and the exact final line "Thanks, ${BID_AUTHOR}". Add concrete specifics to the understanding and to each bullet. No filler, no invented claims, and never start with "You need/You want/Dear".
+    const user = `The proposal below is only ${wc} words — too short. Rewrite it to 115–130 words, keeping the SAME opener style, the method bullets, the honest proof sentence, the closing question, and the exact final line "Thanks, ${BID_AUTHOR}". Add concrete specifics to the understanding and to each bullet. Keep each bullet on its OWN line starting with "- " (real line breaks between them, never inline or comma-joined). No filler, no invented claims, and never start with "You need/You want/Dear".
 
 Current proposal:
 """
