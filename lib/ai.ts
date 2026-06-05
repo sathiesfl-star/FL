@@ -72,11 +72,13 @@ ${a.strengths.map((s) => `- ${s}`).join("\n")}
 
 STRUCTURE
 - FIRST LINE: ONE short, punchy sentence (about 8–15 words) — a confident hook about the result you'll deliver. Keep this opening short and sweet, then break to the next paragraph.
-- HARD BAN — the proposal must NOT begin with any of these words/phrases: "You need", "You want", "You're looking", "You require", "You have", "Happy to", "I'm interested", "I can", "I would", "Dear". Never tell the client what they need. Lead with the OUTCOME you'll deliver or a sharp hook tied to their task (e.g. "Sub-2s load times and a checkout built to convert — that's the goal.").
+- HARD BAN — the proposal must NOT begin with any of these words/phrases: "You need", "You want", "You're looking", "You require", "You have", "Happy to", "I'm interested", "I can", "I would", "Dear". Never tell the client what they need. Lead with the OUTCOME you'll deliver or a sharp hook tied to their task — phrased FRESH in your own words each time. Never reuse a stock line (e.g. do NOT end the opener with "…that's the goal").
 - After the opener, reference 1–2 specific details from the client's description to prove you read it.
-- Keep the WHOLE proposal 90–130 words. Clients skim dozens of bids.
-- Use short sentences or 2–3 quick bullets — no long blocks of text.
-- Be specific about HOW you'll do the work (steps, tools, method), not just that you can.
+- LENGTH: the finished proposal MUST be 100–125 words. Count as you write. Models tend to undershoot — if your draft is under 100 words, EXPAND the understanding sentence and each bullet (more specifics) until it reaches 100+. Never submit under 90.
+- Required parts, in order: (1) the short opener line, (2) 1–2 sentences showing you understood their specific need, (3) 2–3 method bullets, (4) ONE sentence of honest relevant proof, (5) the closing question, (6) "Thanks, ${BID_AUTHOR}".
+- Each method bullet must be a full, specific phrase (8–14 words) naming the actual step and tool — not 3-word fragments.
+- Include ONE sentence of credible proof: a specific relevant experience or result that fits their need (honest — never invented).
+- Keep sentences clear and readable; use 2–3 bullets for the method. Avoid one giant block of text.
 - Mention only 1–2 relevant skills or past projects that fit their need — never list all services.
 
 TONE
@@ -107,7 +109,7 @@ ${p.description}
 """
 
 Return STRICT JSON only:
-{"score": <1-10 int>, "reasons": [<short strings>], "redFlags": [<short strings, [] if none>], "proposal": "<the proposal TEXT ONLY, 90–130 words, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
+{"score": <1-10 int>, "reasons": [<short strings>], "redFlags": [<short strings, [] if none>], "proposal": "<the proposal TEXT ONLY — MUST be 90–130 words (count them; never under 90), with 2–3 method bullets, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,16 +119,58 @@ Return STRICT JSON only:
 export async function scoreAndPropose(p: FreelancerProject, agency: AgencyProfile): Promise<AiResult> {
   const provider = resolveProvider();
   try {
-    if (provider === "groq") return parse(await callGroq(systemPrompt(agency), userPrompt(p)), p);
-    if (provider === "openai") return parse(await callOpenAI(systemPrompt(agency), userPrompt(p)), p);
-    if (provider === "anthropic") return parse(await callAnthropic(systemPrompt(agency), userPrompt(p)), p);
-    if (provider === "gemini") return parse(await callGemini(systemPrompt(agency), userPrompt(p)), p);
-    return mockResult(p, agency);
+    if (provider === "mock") return mockResult(p, agency);
+    const raw = await callByProvider(provider, systemPrompt(agency), userPrompt(p));
+    return await ensureLength(parse(raw, p), provider, agency);
   } catch (err) {
     const m = mockResult(p, agency);
     m.redFlags = [...m.redFlags, `AI error: ${err instanceof Error ? err.message : "failed"}`];
     return m;
   }
+}
+
+/** Dispatch a system+user prompt to the active provider's chat function. */
+async function callByProvider(provider: Provider, system: string, user: string): Promise<string> {
+  if (provider === "groq") return callGroq(system, user);
+  if (provider === "openai") return callOpenAI(system, user);
+  if (provider === "anthropic") return callAnthropic(system, user);
+  if (provider === "gemini") return callGemini(system, user);
+  throw new Error("No live AI provider configured");
+}
+
+const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
+
+/**
+ * Some models (notably Groq/Llama) write very concise proposals that fall under the
+ * 90-word floor. If so, do ONE expand pass that keeps the same structure but adds
+ * concrete detail. Cheap + fast; only runs when the draft is short.
+ */
+async function ensureLength(result: AiResult, provider: Provider, agency: AgencyProfile): Promise<AiResult> {
+  // Concise models (Groq/Llama) undershoot, and the expand pass can undershoot too —
+  // so loop up to twice, stopping as soon as we clear the 90-word floor.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!result.proposal || wordCount(result.proposal) >= 90) break;
+    const wc = wordCount(result.proposal);
+    const user = `The proposal below is only ${wc} words — too short. Rewrite it to 115–130 words, keeping the SAME opener style, the method bullets, the honest proof sentence, the closing question, and the exact final line "Thanks, ${BID_AUTHOR}". Add concrete specifics to the understanding and to each bullet. No filler, no invented claims, and never start with "You need/You want/Dear".
+
+Current proposal:
+"""
+${result.proposal}
+"""
+
+Return STRICT JSON only: {"proposal": "<the expanded 115–130 word proposal text only>"}`;
+    try {
+      const raw = await callByProvider(provider, systemPrompt(agency), user);
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) break;
+      const j = JSON.parse(m[0]);
+      if (typeof j.proposal !== "string" || wordCount(j.proposal) <= wc) break; // no progress — stop
+      result.proposal = j.proposal.trim();
+    } catch {
+      break; // keep the best proposal so far if the expand call fails
+    }
+  }
+  return result;
 }
 
 /**
@@ -143,14 +187,12 @@ ${description}
 """
 
 Return STRICT JSON only:
-{"score": <1-10 int how well it fits the agency>, "reasons": [<short strings>], "redFlags": [<short risk strings, [] if none>], "proposal": "<the proposal TEXT ONLY, 90–130 words, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
+{"score": <1-10 int how well it fits the agency>, "reasons": [<short strings>], "redFlags": [<short risk strings, [] if none>], "proposal": "<the proposal TEXT ONLY — MUST be 90–130 words (count them; never under 90), with 2–3 method bullets, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
 
   try {
-    if (provider === "groq") return parse(await callGroq(systemPrompt(agency), user), null);
-    if (provider === "openai") return parse(await callOpenAI(systemPrompt(agency), user), null);
-    if (provider === "anthropic") return parse(await callAnthropic(systemPrompt(agency), user), null);
-    if (provider === "gemini") return parse(await callGemini(systemPrompt(agency), user), null);
-    return mockFromText(description, agency);
+    if (provider === "mock") return mockFromText(description, agency);
+    const raw = await callByProvider(provider, systemPrompt(agency), user);
+    return await ensureLength(parse(raw, null), provider, agency);
   } catch (err) {
     const m = mockFromText(description, agency);
     m.redFlags = [...m.redFlags, `AI error: ${err instanceof Error ? err.message : "failed"}`];
