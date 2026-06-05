@@ -43,22 +43,52 @@ export interface AiResult {
 // Prompt building
 // ---------------------------------------------------------------------------
 
+/** Name signed at the bottom of every proposal. Configurable, defaults to Seba. */
+const BID_AUTHOR = process.env.BID_AUTHOR_NAME || "Seba";
+
 function systemPrompt(a: AgencyProfile): string {
   const examples = a.winningProposals.length
-    ? `\n\nPast WINNING proposals from this agency — match their tone and structure:\n${a.winningProposals.map((p, i) => `--- Winning proposal ${i + 1} ---\n${p}`).join("\n\n")}`
+    ? `\n\nPast WINNING proposals from this agency — match their tone and structure (do NOT copy them verbatim):\n${a.winningProposals.map((p, i) => `--- Winning proposal ${i + 1} ---\n${p}`).join("\n\n")}`
     : "";
   const portfolio = a.pastProjects?.trim()
-    ? `\n\nPast projects this agency has delivered. When relevant to the client's project, reference 1–2 of these as proof — but ONLY mention ones genuinely related to the client's need. Never claim a project that isn't here:\n${a.pastProjects.trim()}`
+    ? `\n\nPast projects this agency has delivered. When relevant, reference 1–2 of these as proof — but ONLY ones genuinely related to the client's need. Never claim a project that isn't here:\n${a.pastProjects.trim()}`
     : "";
-  return `You are the senior bid writer for "${a.name}", an IT outsourcing agency.
-About: ${a.oneLiner} (${a.site})
-Strengths:
+  // Optional extra rules the user adds in /settings, layered on top of the core spec.
+  const extraRules = a.rules?.length
+    ? `\n\nAdditional agency notes:\n${a.rules.map((r) => `- ${r}`).join("\n")}`
+    : "";
+  const tone = a.tone?.trim() ? `\n\nAgency tone preference: ${a.tone.trim()}` : "";
+
+  return `You write freelance bid proposals for ${BID_AUTHOR} of "${a.name}", an IT outsourcing agency. The "proposal" you produce must contain ONLY the proposal text a client would read on Freelancer.com — no preamble, headings, or notes.
+
+About ${a.name}: ${a.oneLiner} (${a.site})
+Strengths (mention only the 1–2 that fit the client's need — never list all):
 ${a.strengths.map((s) => `- ${s}`).join("\n")}
 
-Tone: ${a.tone}
+=== PROPOSAL RULES — follow every one ===
 
-Rules you MUST follow:
-${a.rules.map((r) => `- ${r}`).join("\n")}${portfolio}${examples}`;
+STRUCTURE
+- Open with the client's problem or desired outcome as a confident, professional statement. Avoid casual ("Happy to…"), presumptuous ("You need…"), and weak ("I'm interested…") openers.
+- Reference 1–2 specific details from the client's description to prove you read it.
+- Keep it 90–130 words. Clients skim dozens of bids.
+- Use short sentences or 2–3 quick bullets — no long blocks of text.
+- Be specific about HOW you'll do the work (steps, tools, method), not just that you can.
+- Mention only 1–2 relevant skills or past projects that fit their need — never list all services.
+
+TONE
+- Plain, natural English. No buzzwords, no "Dear Sir/Madam," no over-formality.
+- Sound like a real developer wrote it — confident and human, not a template.
+- Match the client's tone and reuse their own words for the task.
+
+HONESTY
+- Never invent client names, fake numbers, or projects we didn't do. Keep past-work claims honest.
+- No "100% guarantee" or unrealistic timelines.
+- If requirements are vague, ask one clarifying question instead of guessing.
+
+ENDING
+- End the body with ONE simple question or next step the client can answer directly in Freelancer chat.
+- Never ask for email, phone, or off-platform contact (breaks Freelancer rules and adds friction).
+- Then sign off on a new line, exactly: "Thanks, ${BID_AUTHOR}"${tone}${extraRules}${portfolio}${examples}`;
 }
 
 function userPrompt(p: FreelancerProject): string {
@@ -73,7 +103,7 @@ ${p.description}
 """
 
 Return STRICT JSON only:
-{"score": <1-10 int>, "reasons": [<short strings>], "redFlags": [<short strings, [] if none>], "proposal": "<90-150 word proposal following all rules>"}`;
+{"score": <1-10 int>, "reasons": [<short strings>], "redFlags": [<short strings, [] if none>], "proposal": "<the proposal TEXT ONLY, 90–130 words, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +138,7 @@ ${description}
 """
 
 Return STRICT JSON only:
-{"score": <1-10 int how well it fits the agency>, "reasons": [<short strings>], "redFlags": [<short risk strings, [] if none>], "proposal": "<90-150 word proposal following all rules>"}`;
+{"score": <1-10 int how well it fits the agency>, "reasons": [<short strings>], "redFlags": [<short risk strings, [] if none>], "proposal": "<the proposal TEXT ONLY, 90–130 words, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
 
   try {
     if (provider === "openai") return parse(await callOpenAI(systemPrompt(agency), user), null);
@@ -208,7 +238,7 @@ function mockFromText(description: string, a: AgencyProfile): AiResult {
     score: 7,
     reasons: ["Matches agency skills"],
     redFlags: /cheap|urgent!!!|low budget/i.test(description) ? ["Low-quality signal in description"] : [],
-    proposal: `Hi there — I read your requirement ("${short}…") and it's right in our wheelhouse. At ${a.name} we've delivered similar projects end to end, so we can move quickly and get the details right. I'd suggest a short call to lock the scope and timeline, then I'll share a clear plan with milestones. Could you tell me a bit more about your deadline and must-have features? — Team ${a.name}\n\n[MOCK — add a free Gemini key (AI_PROVIDER=gemini) for real AI proposals.]`,
+    proposal: `Your project ("${short}…") is squarely in our wheelhouse. At ${a.name} we've delivered similar work end to end — clean build, clear updates, on-time. To move fast I'd start by confirming scope and must-have features, then share a short milestone plan. What's your target deadline?\n\nThanks, ${BID_AUTHOR}\n\n[MOCK — add a free Gemini key (AI_PROVIDER=gemini) for real AI proposals.]`,
   };
 }
 
@@ -332,6 +362,6 @@ function mockResult(p: FreelancerProject, a: AgencyProfile): AiResult {
     "Matches agency skills",
   ];
   const redFlags = /cheap|urgent!!!/i.test(p.title + p.description) ? ["Low-quality signal in description"] : [];
-  const proposal = `Hi there — I read through your "${p.title}" requirement and this is squarely in our wheelhouse. At ${a.name} we've delivered similar ${p.skills[0] ?? "web"} projects end to end, so we can move fast and get the details right. I'd suggest a quick call to lock the scope and timeline, then I'll share a clear plan and milestones. Could you tell me a bit more about your deadline and must-have features? — Team ${a.name}\n\n[MOCK proposal — add an OpenAI or Anthropic API key for real AI-written proposals.]`;
+  const proposal = `Your "${p.title}" project is squarely in our wheelhouse. At ${a.name} we've delivered similar ${p.skills[0] ?? "web"} work end to end — clean build, clear updates, on-time. To move fast I'd confirm scope and must-have features first, then share a short milestone plan. What's your target deadline?\n\nThanks, ${BID_AUTHOR}\n\n[MOCK proposal — add an OpenAI or Anthropic API key for real AI-written proposals.]`;
   return { score, reasons, redFlags, proposal };
 }
