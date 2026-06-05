@@ -32,7 +32,7 @@ export function resolveProvider(): Provider {
 }
 
 export function isAiLive(): boolean {
-  return resolveProvider() !== "mock";
+  return buildChain().length > 0;
 }
 
 export interface AiResult {
@@ -131,11 +131,10 @@ Return STRICT JSON only:
 // ---------------------------------------------------------------------------
 
 export async function scoreAndPropose(p: FreelancerProject, agency: AgencyProfile): Promise<AiResult> {
-  const provider = resolveProvider();
+  if (!hasAnyKey()) return mockResult(p, agency);
   try {
-    if (provider === "mock") return mockResult(p, agency);
-    const raw = await callByProvider(provider, systemPrompt(agency), userPrompt(p));
-    return await ensureLength(parse(raw, p), provider, agency);
+    const raw = await callWithFailover(systemPrompt(agency), userPrompt(p));
+    return await ensureLength(parse(raw, p), agency);
   } catch (err) {
     const m = mockResult(p, agency);
     m.redFlags = [...m.redFlags, `AI error: ${err instanceof Error ? err.message : "failed"}`];
@@ -143,13 +142,72 @@ export async function scoreAndPropose(p: FreelancerProject, agency: AgencyProfil
   }
 }
 
-/** Dispatch a system+user prompt to the active provider's chat function. */
-async function callByProvider(provider: Provider, system: string, user: string): Promise<string> {
-  if (provider === "groq") return callGroq(system, user);
-  if (provider === "openai") return callOpenAI(system, user);
-  if (provider === "anthropic") return callAnthropic(system, user);
-  if (provider === "gemini") return callGemini(system, user);
+/** Dispatch a system+user prompt to one provider using a specific API key. */
+async function callByProvider(provider: Provider, system: string, user: string, key: string): Promise<string> {
+  if (provider === "groq") return callGroq(system, user, key);
+  if (provider === "openai") return callOpenAI(system, user, key);
+  if (provider === "anthropic") return callAnthropic(system, user, key);
+  if (provider === "gemini") return callGemini(system, user, key);
   throw new Error("No live AI provider configured");
+}
+
+/**
+ * Collect every API key for one provider. Supports a comma-separated list in the
+ * main var AND numbered extras (e.g. GEMINI_API_KEY, GEMINI_API_KEY_2, _3) — so you
+ * can pool several free accounts.
+ */
+function keysFor(envName: string): string[] {
+  const keys: string[] = [];
+  const main = process.env[envName];
+  if (main) keys.push(...main.split(",").map((k) => k.trim()));
+  for (let i = 2; i <= 6; i++) {
+    const k = process.env[`${envName}_${i}`];
+    if (k && k.trim()) keys.push(k.trim());
+  }
+  return [...new Set(keys.filter(Boolean))];
+}
+
+/**
+ * Build the ordered failover chain of (provider, key) pairs. The preferred provider
+ * (AI_PROVIDER) goes first, then the rest in a free-first order. When one key hits a
+ * quota/rate limit we move to the next — pooling e.g. one Groq key + three Gemini
+ * accounts to multiply free capacity, with no manual switching.
+ */
+function buildChain(): { provider: Provider; key: string }[] {
+  const groups: Record<string, string[]> = {
+    groq: keysFor("GROQ_API_KEY"),
+    gemini: keysFor("GEMINI_API_KEY"),
+    openai: keysFor("OPENAI_API_KEY"),
+    anthropic: keysFor("ANTHROPIC_API_KEY"),
+  };
+  const preferred = process.env.AI_PROVIDER || "";
+  const order = [preferred, "groq", "gemini", "openai", "anthropic"].filter(
+    (p, i, a) => p && groups[p]?.length && a.indexOf(p) === i
+  );
+  return order.flatMap((p) => groups[p].map((key) => ({ provider: p as Provider, key })));
+}
+
+/** True if any provider key is configured (i.e. not mock mode). */
+function hasAnyKey(): boolean {
+  return buildChain().length > 0;
+}
+
+/**
+ * Call the AI with automatic failover: try each key in the chain; on a quota / rate-limit
+ * (or any) error, fall through to the next. Throws only if every key fails.
+ */
+async function callWithFailover(system: string, user: string): Promise<string> {
+  const chain = buildChain();
+  if (!chain.length) throw new Error("No AI provider key configured");
+  let lastErr: unknown;
+  for (const { provider, key } of chain) {
+    try {
+      return await callByProvider(provider, system, user, key);
+    } catch (err) {
+      lastErr = err; // try the next key/provider (rate limit, quota, bad key, transient…)
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("All AI providers failed");
 }
 
 const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
@@ -159,7 +217,7 @@ const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
  * 90-word floor. If so, do ONE expand pass that keeps the same structure but adds
  * concrete detail. Cheap + fast; only runs when the draft is short.
  */
-async function ensureLength(result: AiResult, provider: Provider, agency: AgencyProfile): Promise<AiResult> {
+async function ensureLength(result: AiResult, agency: AgencyProfile): Promise<AiResult> {
   // Concise models (Groq/Llama) sometimes write short. Do at most ONE expand pass,
   // and only when the draft is clearly short (< 80 words) — expanding every borderline
   // proposal triples token usage and trips free-tier rate limits.
@@ -175,7 +233,7 @@ ${result.proposal}
 
 Return STRICT JSON only: {"proposal": "<the expanded 115–130 word proposal text only>"}`;
     try {
-      const raw = await callByProvider(provider, systemPrompt(agency), user);
+      const raw = await callWithFailover(systemPrompt(agency), user);
       // Use the same salvage parser — the expanded proposal contains real line breaks
       // (the bullet list), which would make a raw JSON.parse throw.
       const expanded = parse(raw, null).proposal;
@@ -193,7 +251,6 @@ Return STRICT JSON only: {"proposal": "<the expanded 115–130 word proposal tex
  * No Freelancer connection — the user copies a project from anywhere and pastes it here.
  */
 export async function proposeFromText(description: string, agency: AgencyProfile): Promise<AiResult> {
-  const provider = resolveProvider();
   const user = `A potential client posted this project. Write a winning bid proposal for it.
 
 Project description:
@@ -205,9 +262,9 @@ Return STRICT JSON only:
 {"score": <1-10 int how well it fits the agency>, "reasons": [<short strings>], "redFlags": [<short risk strings, [] if none>], "proposal": "<the proposal TEXT ONLY — MUST be 90–130 words (count them; never under 90), with 2–3 method bullets, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
 
   try {
-    if (provider === "mock") return mockFromText(description, agency);
-    const raw = await callByProvider(provider, systemPrompt(agency), user);
-    return await ensureLength(parse(raw, null), provider, agency);
+    if (!hasAnyKey()) return mockFromText(description, agency);
+    const raw = await callWithFailover(systemPrompt(agency), user);
+    return await ensureLength(parse(raw, null), agency);
   } catch (err) {
     const m = mockFromText(description, agency);
     m.redFlags = [...m.redFlags, `AI error: ${err instanceof Error ? err.message : "failed"}`];
@@ -231,7 +288,6 @@ export interface ProjectDoc {
 }
 
 export async function generateProjectDoc(description: string, agency: AgencyProfile): Promise<ProjectDoc> {
-  const provider = resolveProvider();
   const user = `A potential client posted this project (may be high-value/NDA). Produce a DETAILED, professional project document we can send them.
 
 Project description:
@@ -252,12 +308,8 @@ Return STRICT JSON only with these keys:
 }`;
 
   try {
-    let raw = "";
-    if (provider === "groq") raw = await callGroq(systemPrompt(agency), user);
-    else if (provider === "openai") raw = await callOpenAI(systemPrompt(agency), user);
-    else if (provider === "anthropic") raw = await callAnthropic(systemPrompt(agency), user);
-    else if (provider === "gemini") raw = await callGemini(systemPrompt(agency), user);
-    else return mockDoc(description, agency);
+    if (!hasAnyKey()) return mockDoc(description, agency);
+    const raw = await callWithFailover(systemPrompt(agency), user);
 
     const m = raw.match(/\{[\s\S]*\}/);
     if (m) {
@@ -310,11 +362,11 @@ function mockFromText(description: string, a: AgencyProfile): AiResult {
 // Providers
 // ---------------------------------------------------------------------------
 
-async function callOpenAI(system: string, user: string): Promise<string> {
+async function callOpenAI(system: string, user: string, key: string): Promise<string> {
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model,
       messages: [
@@ -330,8 +382,8 @@ async function callOpenAI(system: string, user: string): Promise<string> {
   return data?.choices?.[0]?.message?.content ?? "";
 }
 
-async function callGroq(system: string, user: string): Promise<string> {
-  // Groq is OpenAI-compatible. Llama 3.3 70B supports JSON mode. FREE, no card.
+async function callGroq(system: string, user: string, key: string): Promise<string> {
+  // Groq is OpenAI-compatible. Llama 3.3 70B. FREE, no card.
   const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
   // NOTE: no response_format:json_object here. Strict JSON mode rejects proposals
   // that contain real line breaks (our bulleted method list), returning 400. We ask
@@ -339,7 +391,7 @@ async function callGroq(system: string, user: string): Promise<string> {
   // multi-line formatting we want.
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model,
       messages: [
@@ -355,9 +407,8 @@ async function callGroq(system: string, user: string): Promise<string> {
   return data?.choices?.[0]?.message?.content ?? "";
 }
 
-async function callGemini(system: string, user: string): Promise<string> {
+async function callGemini(system: string, user: string, key: string): Promise<string> {
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-  const key = process.env.GEMINI_API_KEY as string;
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
     {
@@ -381,12 +432,12 @@ async function callGemini(system: string, user: string): Promise<string> {
   return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 }
 
-async function callAnthropic(system: string, user: string): Promise<string> {
+async function callAnthropic(system: string, user: string, key: string): Promise<string> {
   const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": process.env.ANTHROPIC_API_KEY as string,
+      "x-api-key": key,
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
