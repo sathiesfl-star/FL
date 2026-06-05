@@ -68,9 +68,10 @@ ${a.strengths.map((s) => `- ${s}`).join("\n")}
 === PROPOSAL RULES — follow every one ===
 
 STRUCTURE
-- Open with the client's problem or desired outcome as a confident, professional statement. Avoid casual ("Happy to…"), presumptuous ("You need…"), and weak ("I'm interested…") openers.
-- Reference 1–2 specific details from the client's description to prove you read it.
-- Keep it 90–130 words. Clients skim dozens of bids.
+- FIRST LINE: ONE short, punchy sentence (about 8–15 words) — a confident hook about the result you'll deliver. Keep this opening short and sweet, then break to the next paragraph.
+- HARD BAN — the proposal must NOT begin with any of these words/phrases: "You need", "You want", "You're looking", "You require", "You have", "Happy to", "I'm interested", "I can", "I would", "Dear". Never tell the client what they need. Lead with the OUTCOME you'll deliver or a sharp hook tied to their task (e.g. "Sub-2s load times and a checkout built to convert — that's the goal.").
+- After the opener, reference 1–2 specific details from the client's description to prove you read it.
+- Keep the WHOLE proposal 90–130 words. Clients skim dozens of bids.
 - Use short sentences or 2–3 quick bullets — no long blocks of text.
 - Be specific about HOW you'll do the work (steps, tools, method), not just that you can.
 - Mention only 1–2 relevant skills or past projects that fit their need — never list all services.
