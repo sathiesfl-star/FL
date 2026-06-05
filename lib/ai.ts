@@ -2,9 +2,10 @@
  * AI layer — provider-flexible (OpenAI or Anthropic), with a mock fallback.
  *
  * Provider chosen by env:
- *   AI_PROVIDER=gemini     + GEMINI_API_KEY     -> Google Gemini (gemini-2.0-flash) — FREE tier
- *   AI_PROVIDER=openai     + OPENAI_API_KEY     -> ChatGPT (gpt-4o-mini by default)
- *   AI_PROVIDER=anthropic  + ANTHROPIC_API_KEY  -> Claude  (sonnet by default)
+ *   AI_PROVIDER=groq       + GROQ_API_KEY       -> Groq (Llama 3.3 70B) — FREE, no card, generous
+ *   AI_PROVIDER=gemini     + GEMINI_API_KEY     -> Google Gemini (gemini-2.5-flash) — FREE, low daily cap
+ *   AI_PROVIDER=openai     + OPENAI_API_KEY     -> ChatGPT (gpt-4o-mini by default) — paid
+ *   AI_PROVIDER=anthropic  + ANTHROPIC_API_KEY  -> Claude  (sonnet by default) — paid
  *   (auto-detect: if AI_PROVIDER unset, uses whichever key is present)
  *   no key                 -> "mock" mode: deterministic sample output, zero cost.
  *
@@ -14,14 +15,16 @@
 import type { FreelancerProject } from "./freelancer";
 import type { AgencyProfile } from "./agency-profile";
 
-type Provider = "openai" | "anthropic" | "gemini" | "mock";
+type Provider = "openai" | "anthropic" | "gemini" | "groq" | "mock";
 
 export function resolveProvider(): Provider {
   const explicit = process.env.AI_PROVIDER as Provider | undefined;
+  if (explicit === "groq" && process.env.GROQ_API_KEY) return "groq";
   if (explicit === "openai" && process.env.OPENAI_API_KEY) return "openai";
   if (explicit === "anthropic" && process.env.ANTHROPIC_API_KEY) return "anthropic";
   if (explicit === "gemini" && process.env.GEMINI_API_KEY) return "gemini";
-  // auto-detect
+  // auto-detect (prefer the generous free option first)
+  if (process.env.GROQ_API_KEY) return "groq";
   if (process.env.GEMINI_API_KEY) return "gemini";
   if (process.env.OPENAI_API_KEY) return "openai";
   if (process.env.ANTHROPIC_API_KEY) return "anthropic";
@@ -114,6 +117,7 @@ Return STRICT JSON only:
 export async function scoreAndPropose(p: FreelancerProject, agency: AgencyProfile): Promise<AiResult> {
   const provider = resolveProvider();
   try {
+    if (provider === "groq") return parse(await callGroq(systemPrompt(agency), userPrompt(p)), p);
     if (provider === "openai") return parse(await callOpenAI(systemPrompt(agency), userPrompt(p)), p);
     if (provider === "anthropic") return parse(await callAnthropic(systemPrompt(agency), userPrompt(p)), p);
     if (provider === "gemini") return parse(await callGemini(systemPrompt(agency), userPrompt(p)), p);
@@ -142,6 +146,7 @@ Return STRICT JSON only:
 {"score": <1-10 int how well it fits the agency>, "reasons": [<short strings>], "redFlags": [<short risk strings, [] if none>], "proposal": "<the proposal TEXT ONLY, 90–130 words, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
 
   try {
+    if (provider === "groq") return parse(await callGroq(systemPrompt(agency), user), null);
     if (provider === "openai") return parse(await callOpenAI(systemPrompt(agency), user), null);
     if (provider === "anthropic") return parse(await callAnthropic(systemPrompt(agency), user), null);
     if (provider === "gemini") return parse(await callGemini(systemPrompt(agency), user), null);
@@ -191,7 +196,8 @@ Return STRICT JSON only with these keys:
 
   try {
     let raw = "";
-    if (provider === "openai") raw = await callOpenAI(systemPrompt(agency), user);
+    if (provider === "groq") raw = await callGroq(systemPrompt(agency), user);
+    else if (provider === "openai") raw = await callOpenAI(systemPrompt(agency), user);
     else if (provider === "anthropic") raw = await callAnthropic(systemPrompt(agency), user);
     else if (provider === "gemini") raw = await callGemini(systemPrompt(agency), user);
     else return mockDoc(description, agency);
@@ -263,6 +269,28 @@ async function callOpenAI(system: string, user: string): Promise<string> {
     }),
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content ?? "";
+}
+
+async function callGroq(system: string, user: string): Promise<string> {
+  // Groq is OpenAI-compatible. Llama 3.3 70B supports JSON mode. FREE, no card.
+  const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.6,
+      max_tokens: 900,
+    }),
+  });
+  if (!res.ok) throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 160)}`);
   const data = await res.json();
   return data?.choices?.[0]?.message?.content ?? "";
 }
