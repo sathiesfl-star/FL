@@ -160,10 +160,11 @@ const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
  * concrete detail. Cheap + fast; only runs when the draft is short.
  */
 async function ensureLength(result: AiResult, provider: Provider, agency: AgencyProfile): Promise<AiResult> {
-  // Concise models (Groq/Llama) undershoot, and the expand pass can undershoot too —
-  // so loop up to twice, stopping as soon as we clear the 90-word floor.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (!result.proposal || wordCount(result.proposal) >= 90) break;
+  // Concise models (Groq/Llama) sometimes write short. Do at most ONE expand pass,
+  // and only when the draft is clearly short (< 80 words) — expanding every borderline
+  // proposal triples token usage and trips free-tier rate limits.
+  for (let attempt = 0; attempt < 1; attempt++) {
+    if (!result.proposal || wordCount(result.proposal) >= 80) break;
     const wc = wordCount(result.proposal);
     const user = `The proposal below is only ${wc} words — too short. Rewrite it to 115–130 words, keeping the SAME short one-line opener, the method bullets, the honest proof sentence, the closing question, and the exact final line "Thanks, ${BID_AUTHOR}". Keep the opener and understanding short — add the extra words by making each bullet more specific. KEEP the spaced layout: one blank line between the opener, the understanding sentence, the bullet list, the proof+question, and the sign-off. Each bullet on its OWN line starting with "• " (a bullet dot, never inline or comma-joined). No filler, no invented claims, and never start with "You need/You want/Dear".
 
