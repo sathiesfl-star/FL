@@ -77,7 +77,7 @@ STRUCTURE
 - LENGTH: the finished proposal MUST be 100–125 words. Count as you write. Models tend to undershoot — if your draft is under 100 words, EXPAND the understanding sentence and each bullet (more specifics) until it reaches 100+. Never submit under 90.
 - Required parts, in order: (1) the short opener line, (2) 1–2 sentences showing you understood their specific need, (3) 2–3 method bullets, (4) ONE sentence of honest relevant proof, (5) the closing question, (6) "Thanks, ${BID_AUTHOR}".
 - Each method bullet must be a full, specific phrase (8–14 words) naming the actual step and tool — not 3-word fragments.
-- FORMATTING: put each method bullet on its OWN line, starting with "- " (hyphen + space), with a real line break (\\n) between bullets. NEVER write bullets inline or join them with commas. There should also be a blank line before the first bullet and after the last.
+- FORMATTING: put each method bullet on its OWN line, each starting with "- " (hyphen + space). Separate the bullets with line breaks — NEVER write them inline or join them with commas.
 - Include ONE sentence of credible proof: a specific relevant experience or result that fits their need (honest — never invented).
 - Keep sentences clear and readable; use 2–3 bullets for the method. Avoid one giant block of text.
 - Mention only 1–2 relevant skills or past projects that fit their need — never list all services.
@@ -162,11 +162,11 @@ ${result.proposal}
 Return STRICT JSON only: {"proposal": "<the expanded 115–130 word proposal text only>"}`;
     try {
       const raw = await callByProvider(provider, systemPrompt(agency), user);
-      const m = raw.match(/\{[\s\S]*\}/);
-      if (!m) break;
-      const j = JSON.parse(m[0]);
-      if (typeof j.proposal !== "string" || wordCount(j.proposal) <= wc) break; // no progress — stop
-      result.proposal = j.proposal.trim();
+      // Use the same salvage parser — the expanded proposal contains real line breaks
+      // (the bullet list), which would make a raw JSON.parse throw.
+      const expanded = parse(raw, null).proposal;
+      if (!expanded || wordCount(expanded) <= wc) break; // no progress — stop
+      result.proposal = expanded.trim();
     } catch {
       break; // keep the best proposal so far if the expand call fails
     }
@@ -319,6 +319,10 @@ async function callOpenAI(system: string, user: string): Promise<string> {
 async function callGroq(system: string, user: string): Promise<string> {
   // Groq is OpenAI-compatible. Llama 3.3 70B supports JSON mode. FREE, no card.
   const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+  // NOTE: no response_format:json_object here. Strict JSON mode rejects proposals
+  // that contain real line breaks (our bulleted method list), returning 400. We ask
+  // for JSON in the prompt and let parse() salvage the proposal — which preserves the
+  // multi-line formatting we want.
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
@@ -328,7 +332,6 @@ async function callGroq(system: string, user: string): Promise<string> {
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      response_format: { type: "json_object" },
       temperature: 0.6,
       max_tokens: 900,
     }),
