@@ -71,13 +71,13 @@ ${a.strengths.map((s) => `- ${s}`).join("\n")}
 === PROPOSAL RULES — follow every one ===
 
 STRUCTURE
-- FIRST LINE: ONE short, punchy sentence (about 8–15 words) — a confident hook about the result you'll deliver. Keep this opening short and sweet, then break to the next paragraph.
+- FIRST LINE: ONE short, punchy sentence — MAXIMUM 12 words — a confident hook about the result you'll deliver. This is paragraph 1 BY ITSELF: do NOT add a second sentence to it. End it, then a line break.
 - HARD BAN — the proposal must NOT begin with any of these words/phrases: "You need", "You want", "You're looking", "You require", "You have", "Happy to", "I'm interested", "I can", "I would", "Dear". Never tell the client what they need. Lead with the OUTCOME you'll deliver or a sharp hook tied to their task — phrased FRESH in your own words each time. Never reuse a stock line (e.g. do NOT end the opener with "…that's the goal").
-- After the opener, reference 1–2 specific details from the client's description to prove you read it.
-- LENGTH: the finished proposal MUST be 100–125 words. Count as you write. Models tend to undershoot — if your draft is under 100 words, EXPAND the understanding sentence and each bullet (more specifics) until it reaches 100+. Never submit under 90.
-- Required parts, in order: (1) the short opener line, (2) 1–2 sentences showing you understood their specific need, (3) 2–3 method bullets, (4) ONE sentence of honest relevant proof, (5) the closing question, (6) "Thanks, ${BID_AUTHOR}".
+- After the opener, ONE short sentence (not a long run-on) referencing a specific detail from their description to prove you read it.
+- LENGTH: the finished proposal MUST be 100–125 words. Count as you write. Models tend to undershoot — if your draft is under 100 words, EXPAND each bullet (more specifics) until it reaches 100+. Never submit under 90. Keep the opener and understanding short; the word count comes from the bullets.
+- Required parts, in order: (1) the short one-line opener, (2) ONE short understanding sentence, (3) 2–3 method bullets, (4) ONE sentence of honest relevant proof, (5) the closing question, (6) "Thanks, ${BID_AUTHOR}".
 - Each method bullet must be a full, specific phrase (8–14 words) naming the actual step and tool — not 3-word fragments.
-- FORMATTING: put each method bullet on its OWN line, each starting with "- " (hyphen + space). Separate the bullets with line breaks — NEVER write them inline or join them with commas.
+- FORMATTING: put each method bullet on its OWN line, each starting with "• " (a bullet dot + space). Separate the bullets with line breaks — NEVER write them inline, join them with commas, or use a dash/asterisk.
 - Include ONE sentence of credible proof: a specific relevant experience or result that fits their need (honest — never invented).
 - Keep sentences clear and readable; use 2–3 bullets for the method. Avoid one giant block of text.
 - Mention only 1–2 relevant skills or past projects that fit their need — never list all services.
@@ -152,7 +152,7 @@ async function ensureLength(result: AiResult, provider: Provider, agency: Agency
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!result.proposal || wordCount(result.proposal) >= 90) break;
     const wc = wordCount(result.proposal);
-    const user = `The proposal below is only ${wc} words — too short. Rewrite it to 115–130 words, keeping the SAME opener style, the method bullets, the honest proof sentence, the closing question, and the exact final line "Thanks, ${BID_AUTHOR}". Add concrete specifics to the understanding and to each bullet. Keep each bullet on its OWN line starting with "- " (real line breaks between them, never inline or comma-joined). No filler, no invented claims, and never start with "You need/You want/Dear".
+    const user = `The proposal below is only ${wc} words — too short. Rewrite it to 115–130 words, keeping the SAME short one-line opener, the method bullets, the honest proof sentence, the closing question, and the exact final line "Thanks, ${BID_AUTHOR}". Keep the opener and understanding short — add the extra words by making each bullet more specific. Each bullet on its OWN line starting with "• " (a bullet dot; real line breaks between them, never inline or comma-joined). No filler, no invented claims, and never start with "You need/You want/Dear".
 
 Current proposal:
 """
