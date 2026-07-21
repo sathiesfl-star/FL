@@ -46,8 +46,20 @@ export interface AiResult {
 // Prompt building
 // ---------------------------------------------------------------------------
 
-/** Name signed at the bottom of every proposal. Configurable, defaults to Seba. */
-const BID_AUTHOR = process.env.BID_AUTHOR_NAME || "Seba";
+/** Name signed at the bottom of every proposal. Override with BID_AUTHOR_NAME. */
+const BID_AUTHOR = process.env.BID_AUTHOR_NAME || "Sathies";
+/** The line above the name, e.g. "Best regards," — matches our awarded bids. */
+const BID_SIGNOFF = process.env.BID_SIGNOFF || "Best regards,";
+
+/**
+ * Pull URLs out of the client's post. Our winning bids open by naming the exact link the
+ * client shared ("Hello, I checked <url>") — it proves we actually opened it, which no
+ * templated bid does. Surfacing the links to the model makes that line reliable.
+ */
+function extractLinks(text: string): string[] {
+  const m = text.match(/https?:\/\/[^\s<>()"']+/g) || [];
+  return [...new Set(m.map((u) => u.replace(/[.,;]+$/, "")))].slice(0, 4);
+}
 
 function systemPrompt(a: AgencyProfile): string {
   const examples = a.winningProposals.length
@@ -70,48 +82,78 @@ ${a.strengths.map((s) => `- ${s}`).join("\n")}
 
 === PROPOSAL RULES — follow every one ===
 
-STRUCTURE
-- FIRST LINE: ONE short, punchy sentence — MAXIMUM 12 words — a confident hook about the result you'll deliver. This is paragraph 1 BY ITSELF: do NOT add a second sentence to it. End it, then a line break.
-- HARD BAN — the proposal must NOT begin with any of these words/phrases: "You need", "You want", "You're looking", "You require", "You have", "Happy to", "I'm interested", "I can", "I would", "Dear". Never tell the client what they need. Lead with the OUTCOME you'll deliver or a sharp hook tied to their task — phrased FRESH in your own words each time. Never reuse a stock line (e.g. do NOT end the opener with "…that's the goal").
-- After the opener, ONE short sentence (not a long run-on) referencing a specific detail from their description to prove you read it.
-- LENGTH: the finished proposal MUST be 100–125 words. Count as you write. Models tend to undershoot — if your draft is under 100 words, EXPAND each bullet (more specifics) until it reaches 100+. Never submit under 90. Keep the opener and understanding short; the word count comes from the bullets.
-- Each method bullet must be a full, specific phrase (8–14 words) naming the actual step and tool — not 3-word fragments.
-- LAYOUT — output EXACTLY this shape, with ONE BLANK LINE between each block (this spacing is required, do not cram it together):
+This structure is copied from bids this agency has ACTUALLY WON. Do not invent a different
+shape. The winning voice is collaborative and evidence-led — "here is what I understood,
+correct me, give me access" — NOT salesy. Never pitch, never boast, never use a hook.
 
-[one short opener line]
+LAYOUT — output EXACTLY these six blocks, in this order, with ONE BLANK LINE between
+blocks (except where marked NO BLANK LINE):
 
-[one short sentence proving you read their post]
+[1] Hello, I checked [the exact URL the client shared]
+[2] [one dense scope sentence]
+[3] [one short access question]
+[4] Understandings; (correct if needed)
+    1. [understanding]        <- NO BLANK LINE between block 4's header and the numbers
+    2. [understanding]
+    3. [understanding]
+[5] ${BID_SIGNOFF}
+    ${BID_AUTHOR}             <- NO BLANK LINE between the sign-off and the name
+[6] [one private-chat proof line]
 
-• [method bullet 1]
-• [method bullet 2]
-• [method bullet 3]
+BLOCK 1 — EVIDENCE OPENER
+- If the client's post contains a URL, write exactly: "Hello, I checked <that full URL>" — paste the URL verbatim, do not shorten or alter it. Use the URL of the site that NEEDS THE WORK, not their live/other site, if you can tell them apart.
+- If there is NO URL, instead name the most specific concrete artifact in their post (a file, page count, repo, platform, error) in one short line: e.g. "Hello, I read through your 23-page Elementor build."
+- Nothing else on this line. No pitch, no "I'm interested".
 
-[one honest proof sentence] [one short closing question]
+BLOCK 2 — SCOPE MIRROR
+- ONE dense sentence beginning "Let us …" that plays their WHOLE scope back to them, items joined by commas or dashes, using THEIR OWN vocabulary and numbers.
+- This proves comprehension better than any claim. Copy their nouns ("23-page", "broken/dead links", "review/FAQ schema") rather than paraphrasing into generic words.
 
-Thanks, ${BID_AUTHOR}
+BLOCK 3 — THE ASK (EARLY, not at the end)
+- ONE short question asking for the exact access or input you need to start: editor credentials, repo access, designs, a sample file, admin login.
+- If their post already offers it ("message me for credentials"), ask for precisely that.
+- Frame it as needed BEFORE committing: "… so we can inspect the build before quoting?"
+- Never ask for email, phone, WhatsApp, or off-platform contact — that breaks Freelancer rules.
 
-- Bullets: each on its OWN line starting with "• " (a bullet dot + space). Never inline, comma-joined, dashes, or asterisks.
-- Include ONE sentence of credible proof: a specific relevant experience or result that fits their need (honest — never invented).
-- Keep sentences clear and readable; use 2–3 bullets for the method. Avoid one giant block of text.
-- Mention only 1–2 relevant skills or past projects that fit their need — never list all services.
+BLOCK 4 — UNDERSTANDINGS
+- Start with the literal header line: "Understandings; (correct if needed)"
+- Then EXACTLY 3 numbered lines: "1. ", "2. ", "3. " — NEVER bullets, dashes, or "•".
+- Each is a concrete step or assumption in 8–16 words, naming the real action and order of work (audit first, then repair; test desktop and mobile; restore dashboard access).
+- Inviting correction is deliberate — it lowers the client's risk and starts a conversation.
+
+BLOCK 5 — SIGN-OFF
+- Exactly two lines: "${BID_SIGNOFF}" then "${BID_AUTHOR}". No blank line between them.
+
+BLOCK 6 — PROOF, DEFERRED
+- ONE line AFTER the sign-off offering to share directly relevant past work in private chat, naming the specific niche: e.g. "I will share similar WordPress repair/recovery work in a private chat."
+- This is why it works: it gives the client a reason to reply, and keeps the bid honest — you show proof instead of claiming numbers.
+
+LENGTH
+- 85–115 words total. Dense, not padded. If short, add specificity to the 3 understandings — never add filler sentences or extra blocks.
 
 TONE
-- Plain, natural English. No buzzwords, no "Dear Sir/Madam," no over-formality.
-- Sound like a real developer wrote it — confident and human, not a template.
-- Match the client's tone and reuse their own words for the task.
+- Plain, natural English. Slightly clipped and practical, like a working developer typing fast.
+- No buzzwords, no "Dear Sir/Madam", no flattery, no "I am excited/interested", no superlatives.
+- Match the client's own tone and reuse their words.
 
 HONESTY
-- Never invent client names, fake numbers, or projects we didn't do. Keep past-work claims honest.
+- Never invent client names, fake numbers, or projects we didn't do.
 - No "100% guarantee" or unrealistic timelines.
-- If requirements are vague, ask one clarifying question instead of guessing.
+- Claim only that you CHECKED the link they shared — never claim to have already diagnosed, fixed, or logged into anything.${tone}${extraRules}${portfolio}${examples}`;
+}
 
-ENDING
-- End the body with ONE simple question or next step the client can answer directly in Freelancer chat.
-- Never ask for email, phone, or off-platform contact (breaks Freelancer rules and adds friction).
-- Then sign off on a new line, exactly: "Thanks, ${BID_AUTHOR}"${tone}${extraRules}${portfolio}${examples}`;
+/** The shared JSON contract + reminder of the winning shape, used by every proposal call. */
+function jsonSpec(extra = ""): string {
+  return `Return STRICT JSON only:
+{"score": <1-10 int${extra}>, "reasons": [<short strings>], "redFlags": [<short strings, [] if none>], "proposal": "<the proposal TEXT ONLY — 85–115 words, following the six-block layout exactly: 'Hello, I checked <url>' / 'Let us …' scope sentence / one access question / 'Understandings; (correct if needed)' + 3 NUMBERED lines / '${BID_SIGNOFF}' + '${BID_AUTHOR}' / one private-chat proof line AFTER the sign-off>"}`;
 }
 
 function userPrompt(p: FreelancerProject): string {
+  const links = extractLinks(p.description);
+  const linkBlock = links.length
+    ? `\nLinks the client shared (open BLOCK 1 with the one that needs the work — paste it verbatim):\n${links.map((l) => `- ${l}`).join("\n")}`
+    : `\nLinks the client shared: none — use the "no URL" form of BLOCK 1.`;
+
   return `Project on Freelancer.com:
 Title: ${p.title}
 Budget: ${p.budgetMin ?? "?"}–${p.budgetMax ?? "?"} ${p.currency} (${p.projectType})
@@ -121,9 +163,9 @@ Description:
 """
 ${p.description}
 """
+${linkBlock}
 
-Return STRICT JSON only:
-{"score": <1-10 int>, "reasons": [<short strings>], "redFlags": [<short strings, [] if none>], "proposal": "<the proposal TEXT ONLY — MUST be 90–130 words (count them; never under 90), with 2–3 method bullets, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
+${jsonSpec()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,14 +266,18 @@ async function ensureLength(result: AiResult, agency: AgencyProfile): Promise<Ai
   for (let attempt = 0; attempt < 1; attempt++) {
     if (!result.proposal || wordCount(result.proposal) >= 80) break;
     const wc = wordCount(result.proposal);
-    const user = `The proposal below is only ${wc} words — too short. Rewrite it to 115–130 words, keeping the SAME short one-line opener, the method bullets, the honest proof sentence, the closing question, and the exact final line "Thanks, ${BID_AUTHOR}". Keep the opener and understanding short — add the extra words by making each bullet more specific. KEEP the spaced layout: one blank line between the opener, the understanding sentence, the bullet list, the proof+question, and the sign-off. Each bullet on its OWN line starting with "• " (a bullet dot, never inline or comma-joined). No filler, no invented claims, and never start with "You need/You want/Dear".
+    const user = `The proposal below is only ${wc} words — too short. Rewrite it to 95–115 words.
+
+KEEP all six blocks exactly as they are, in order and unchanged in kind: the "Hello, I checked …" opener (same URL, verbatim), the "Let us …" scope sentence, the access question, the "Understandings; (correct if needed)" header with its 3 NUMBERED lines, the "${BID_SIGNOFF}" / "${BID_AUTHOR}" sign-off, and the private-chat proof line AFTER the sign-off.
+
+Add the extra words ONLY by making the 3 understandings more specific — name the actual step, page count, or tool. Do NOT add a new block, a new sentence, filler, flattery, or any invented claim. Keep the numbered list numbered (never bullets). Keep one blank line between blocks, but NO blank line between the "Understandings" header and the numbers, and none between the sign-off line and the name.
 
 Current proposal:
 """
 ${result.proposal}
 """
 
-Return STRICT JSON only: {"proposal": "<the expanded 115–130 word proposal text only>"}`;
+Return STRICT JSON only: {"proposal": "<the expanded 95–115 word proposal text only>"}`;
     try {
       const raw = await callWithFailover(systemPrompt(agency), user);
       // Use the same salvage parser — the expanded proposal contains real line breaks
@@ -251,15 +297,20 @@ Return STRICT JSON only: {"proposal": "<the expanded 115–130 word proposal tex
  * No Freelancer connection — the user copies a project from anywhere and pastes it here.
  */
 export async function proposeFromText(description: string, agency: AgencyProfile): Promise<AiResult> {
+  const links = extractLinks(description);
+  const linkBlock = links.length
+    ? `\nLinks the client shared (open BLOCK 1 with the one that needs the work — paste it verbatim):\n${links.map((l) => `- ${l}`).join("\n")}`
+    : `\nLinks the client shared: none — use the "no URL" form of BLOCK 1.`;
+
   const user = `A potential client posted this project. Write a winning bid proposal for it.
 
 Project description:
 """
 ${description}
 """
+${linkBlock}
 
-Return STRICT JSON only:
-{"score": <1-10 int how well it fits the agency>, "reasons": [<short strings>], "redFlags": [<short risk strings, [] if none>], "proposal": "<the proposal TEXT ONLY — MUST be 90–130 words (count them; never under 90), with 2–3 method bullets, following every rule, ending on a new line with 'Thanks, ${BID_AUTHOR}'>"}`;
+${jsonSpec(" how well it fits the agency")}`;
 
   try {
     if (!hasAnyKey()) return mockFromText(description, agency);
@@ -348,13 +399,33 @@ function mockDoc(description: string, a: AgencyProfile): ProjectDoc {
   };
 }
 
+/** A mock in the winning six-block shape, so offline output previews the real layout. */
+function mockProposal(subject: string, description: string, niche: string): string {
+  const link = extractLinks(description)[0];
+  const opener = link ? `Hello, I checked ${link}` : `Hello, I read through your ${subject} post.`;
+  return tidyProposal(
+    [
+      opener,
+      `Let us complete your ${subject} — confirm the full scope, do the build, verify on desktop and mobile, and hand it back fully editable.`,
+      `Send access so we can inspect the current setup before quoting?`,
+      `Understandings; (correct if needed)`,
+      `1. Audit the current state first, then repair rather than rebuild if salvageable`,
+      `2. Confirm every deliverable you listed, tested on both desktop and mobile`,
+      `3. Hand back clean, documented, and editable by your own team`,
+      BID_SIGNOFF,
+      BID_AUTHOR,
+      `I will share similar ${niche} work in a private chat.`,
+    ].join("\n")
+  );
+}
+
 function mockFromText(description: string, a: AgencyProfile): AiResult {
   const short = description.trim().slice(0, 60);
   return {
     score: 7,
     reasons: ["Matches agency skills"],
     redFlags: /cheap|urgent!!!|low budget/i.test(description) ? ["Low-quality signal in description"] : [],
-    proposal: `Your project ("${short}…") is squarely in our wheelhouse. At ${a.name} we've delivered similar work end to end — clean build, clear updates, on-time. To move fast I'd start by confirming scope and must-have features, then share a short milestone plan. What's your target deadline?\n\nThanks, ${BID_AUTHOR}\n\n[MOCK — add a free Gemini key (AI_PROVIDER=gemini) for real AI proposals.]`,
+    proposal: `${mockProposal(`project ("${short}…")`, description, a.strengths[0] ?? "web")}\n\n[MOCK — add a free Gemini key (AI_PROVIDER=gemini) for real AI proposals.]`,
   };
 }
 
@@ -494,11 +565,21 @@ function parse(text: string, _p: FreelancerProject | null): AiResult {
 const clamp = (n: any) => Math.max(1, Math.min(10, Math.round(Number(n) || 5)));
 const arr = (x: any): string[] => (Array.isArray(x) ? x.filter((s) => typeof s === "string") : []);
 
+const LIST_MARKER = /^(?:\d+[.)]|[-*•])\s+/;
+const UNDERSTANDINGS = /^understandings\b/i;
+/** "Best regards," / "Thanks," / "Regards" — the line that sits directly above the name. */
+const SIGNOFF_WORDS = "best regards|kind regards|warm regards|regards|thanks|thank you|sincerely|cheers";
+const SIGNOFF_ONLY = new RegExp(`^(?:${SIGNOFF_WORDS})\\s*,?\\s*$`, "i");
+const SIGNOFF_INLINE = new RegExp(`^((?:${SIGNOFF_WORDS}))\\s*,\\s*(\\S.{0,40})$`, "i");
+
 /**
- * Normalise the model's proposal into clean, well-spaced text — independent of how
- * tidily the model formatted it. We control the whitespace here so the output is
- * always readable: bullets unified to "•", a blank line before/after the bullet
- * block, and a blank line before the "Thanks, …" sign-off.
+ * Normalise the model's proposal into the exact shape of our awarded bids — independent
+ * of how tidily the model formatted it. We own the whitespace here so every bid looks
+ * the same as the ones that won:
+ *   - list items are NUMBERED ("1. "), never bullets — models love "•", we renumber them
+ *   - NO blank line between "Understandings; (correct if needed)" and the numbers
+ *   - NO blank line between the sign-off line and the name
+ *   - a blank line between every other block, including before the trailing proof line
  */
 function tidyProposal(s: string): string {
   let t = (s || "").trim();
@@ -507,22 +588,39 @@ function tidyProposal(s: string): string {
   t = t.replace(/\s*}\s*$/, "").trim();
   t = t.replace(/^"+/, "").replace(/"+$/, "").trim();
 
-  // Split, trim, drop blank lines (we re-insert spacing), unify bullet markers to "• ".
-  const lines = t
+  const raw = t
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .map((l) => (/^[-*•]\s+/.test(l) ? l.replace(/^[-*•]\s+/, "• ") : l));
+    .filter((l) => l.length > 0);
+
+  // Split an inline "Best regards, Sathies" onto the two lines the winning layout uses.
+  const split: string[] = [];
+  for (const l of raw) {
+    const m = !LIST_MARKER.test(l) && l.match(SIGNOFF_INLINE);
+    if (m) split.push(`${m[1]},`, m[2]);
+    else split.push(l);
+  }
+
+  // Renumber every run of list items sequentially, converting bullets to numbers.
+  const lines: string[] = [];
+  let n = 0;
+  for (const l of split) {
+    if (LIST_MARKER.test(l)) lines.push(`${++n}. ${l.replace(LIST_MARKER, "")}`);
+    else {
+      n = 0;
+      lines.push(l);
+    }
+  }
 
   const out: string[] = [];
   for (const line of lines) {
-    const isBullet = line.startsWith("• ");
     const prev = out.length ? out[out.length - 1] : "";
-    const prevBullet = prev.startsWith("• ");
-    const isSignoff = /^thanks[,\s]/i.test(line);
-    if (isBullet && prev && !prevBullet) out.push(""); // blank line before the bullet block
-    else if (!isBullet && prevBullet) out.push(""); // blank line after the bullet block
-    else if (isSignoff && prev) out.push(""); // blank line before the sign-off
+    if (prev) {
+      const glueToHeader = UNDERSTANDINGS.test(prev) && LIST_MARKER.test(line);
+      const glueToList = LIST_MARKER.test(prev) && LIST_MARKER.test(line);
+      const glueToSignoff = SIGNOFF_ONLY.test(prev);
+      if (!glueToHeader && !glueToList && !glueToSignoff) out.push("");
+    }
     out.push(line);
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -541,6 +639,6 @@ function mockResult(p: FreelancerProject, a: AgencyProfile): AiResult {
     "Matches agency skills",
   ];
   const redFlags = /cheap|urgent!!!/i.test(p.title + p.description) ? ["Low-quality signal in description"] : [];
-  const proposal = `Your "${p.title}" project is squarely in our wheelhouse. At ${a.name} we've delivered similar ${p.skills[0] ?? "web"} work end to end — clean build, clear updates, on-time. To move fast I'd confirm scope and must-have features first, then share a short milestone plan. What's your target deadline?\n\nThanks, ${BID_AUTHOR}\n\n[MOCK proposal — add an OpenAI or Anthropic API key for real AI-written proposals.]`;
+  const proposal = `${mockProposal(`"${p.title}"`, p.description, p.skills[0] ?? "web")}\n\n[MOCK proposal — add an OpenAI or Anthropic API key for real AI-written proposals.]`;
   return { score, reasons, redFlags, proposal };
 }
