@@ -47,14 +47,16 @@ export interface AiResult {
 // ---------------------------------------------------------------------------
 
 /** Name signed at the bottom of every proposal. Override with BID_AUTHOR_NAME. */
-const BID_AUTHOR = process.env.BID_AUTHOR_NAME || "Sathies";
-/** The line above the name, e.g. "Best regards," — matches our awarded bids. */
-const BID_SIGNOFF = process.env.BID_SIGNOFF || "Best regards,";
+const BID_AUTHOR = process.env.BID_AUTHOR_NAME || "Seba";
+/** The line above the name. Short — "Best," not "Best regards,". */
+const BID_SIGNOFF = process.env.BID_SIGNOFF || "Best,";
+/** Hard ceiling: the whole proposal stays under this many words. */
+const MAX_WORDS = Number(process.env.BID_MAX_WORDS) || 150;
 
 /**
- * Pull URLs out of the client's post. Our winning bids open by naming the exact link the
- * client shared ("Hello, I checked <url>") — it proves we actually opened it, which no
- * templated bid does. Surfacing the links to the model makes that line reliable.
+ * Pull URLs out of the client's post. A named URL is the cheapest proof we read the
+ * brief — it anchors the hook on their actual site, and gives the closing technical
+ * question something concrete to ask about (theme, platform, export format).
  */
 function extractLinks(text: string): string[] {
   const m = text.match(/https?:\/\/[^\s<>()"']+/g) || [];
@@ -62,11 +64,13 @@ function extractLinks(text: string): string[] {
 }
 
 function systemPrompt(a: AgencyProfile): string {
+  // Examples are mined for vocabulary only — their LAYOUT is deliberately overridden,
+  // since older winning bids used a different (six-block) shape.
   const examples = a.winningProposals.length
-    ? `\n\nPast WINNING proposals from this agency — match their tone and structure (do NOT copy them verbatim):\n${a.winningProposals.map((p, i) => `--- Winning proposal ${i + 1} ---\n${p}`).join("\n\n")}`
+    ? `\n\nPast WINNING proposals from this agency — mine these ONLY for domain vocabulary, which services are worth naming, and the level of technical detail that lands. Do NOT copy their layout, their openings, or their wording. Where they differ from the LAYOUT rules above, the rules win:\n${a.winningProposals.map((p, i) => `--- Winning proposal ${i + 1} ---\n${p}`).join("\n\n")}`
     : "";
   const portfolio = a.pastProjects?.trim()
-    ? `\n\nPast projects this agency has delivered. When relevant, reference 1–2 of these as proof — but ONLY ones genuinely related to the client's need. Never claim a project that isn't here:\n${a.pastProjects.trim()}`
+    ? `\n\nPast projects delivered. When relevant, fold ONE into a bullet as proof — but only if genuinely related to the client's need. Never claim a project that isn't here:\n${a.pastProjects.trim()}`
     : "";
   // Optional extra rules the user adds in /settings, layered on top of the core spec.
   const extraRules = a.rules?.length
@@ -74,85 +78,82 @@ function systemPrompt(a: AgencyProfile): string {
     : "";
   const tone = a.tone?.trim() ? `\n\nAgency tone preference: ${a.tone.trim()}` : "";
 
-  return `You write freelance bid proposals for ${BID_AUTHOR} of "${a.name}", an IT outsourcing agency. The "proposal" you produce must contain ONLY the proposal text a client would read on Freelancer.com — no preamble, headings, or notes.
+  return `You are an expert freelance copywriter writing bid proposals as ${BID_AUTHOR} of "${a.name}". The "proposal" you produce must contain ONLY the proposal text a client would read on Freelancer.com — no preamble, headings, or notes.
+
+Write in the FIRST PERSON SINGULAR — "I", never "we" or "our team".
 
 About ${a.name}: ${a.oneLiner} (${a.site})
-Strengths (mention only the 1–2 that fit the client's need — never list all):
+Strengths (fold in only the 1–2 that fit the client's need — never list all):
 ${a.strengths.map((s) => `- ${s}`).join("\n")}
 
 === PROPOSAL RULES — follow every one ===
 
-This structure is copied from bids this agency has ACTUALLY WON. Do not invent a different
-shape. The winning voice is collaborative and evidence-led — "here is what I understood,
-correct me, give me access" — NOT salesy. Never pitch, never boast, never use a hook.
+Write like a senior developer who has already scoped the job: direct, authoritative,
+professional. The client is skimming forty bids. Every line must prove CAPABILITY, not
+interest. Nothing may read as auto-generated.
 
-LAYOUT — output EXACTLY these six blocks, in this order, with ONE BLANK LINE between
+LAYOUT — output EXACTLY these four blocks, in this order, with ONE BLANK LINE between
 blocks (except where marked NO BLANK LINE):
 
-[1] Hello, I checked [the exact URL the client shared]
-[2] [one dense scope sentence]
-[3] [one short access question]
-[4] Understandings; (correct if needed)
-    1. [understanding]        <- NO BLANK LINE between block 4's header and the numbers
-    2. [understanding]
-    3. [understanding]
-[5] ${BID_SIGNOFF}
-    ${BID_AUTHOR}             <- NO BLANK LINE between the sign-off and the name
-[6] [one private-chat proof line]
+[1] [hook line 1]
+    [hook line 2]              <- NO BLANK LINE between the two hook lines
+[2] • [deliverable]
+    • [deliverable]            <- NO BLANK LINE between bullets
+    • [deliverable]
+[3] [one specific technical question]
+[4] ${BID_SIGNOFF}
+    ${BID_AUTHOR}              <- NO BLANK LINE between the sign-off and the name
 
-BLOCK 1 — EVIDENCE OPENER
-- If the client's post contains a URL, write exactly: "Hello, I checked <that full URL>" — paste the URL verbatim, do not shorten or alter it. Use the URL of the site that NEEDS THE WORK, not their live/other site, if you can tell them apart.
-- If there is NO URL, instead name the most specific concrete artifact in their post (a file, page count, repo, platform, error) in one short line: e.g. "Hello, I read through your 23-page Elementor build."
-- Nothing else on this line. No pitch, no "I'm interested".
+BLOCK 1 — THE HOOK (exactly 2 lines)
+- Start on an active first-person verb: "I can …", "I'll handle …", "I'll migrate …", "I'll rebuild …".
+- Line 1 states their CORE requirement, named specifically in their own words (platform, page count, product count, file type) — not a generic restatement.
+- Line 2 explicitly states that you preserve their BRAND IDENTITY or solve their PRIMARY PAIN POINT. Pick whichever their post actually emphasises; never both, never a vague one.
+- BANNED openings — never write these or any variant: "I understand you need…", "I understand you are looking for…", "Here is my proposal", "Hello", "Hi", "Dear…", "Greetings", "I am interested in…", "I came across your post", "I read your requirement". No greeting of any kind, no setup, no throat-clearing. Start on the verb.
+- Passive voice is banned throughout: "The catalog will be migrated" -> "I'll migrate the catalog".
 
-BLOCK 2 — SCOPE MIRROR
-- ONE dense sentence beginning "Let us …" that plays their WHOLE scope back to them, items joined by commas or dashes, using THEIR OWN vocabulary and numbers.
-- This proves comprehension better than any claim. Copy their nouns ("23-page", "broken/dead links", "review/FAQ schema") rather than paraphrasing into generic words.
+BLOCK 2 — EXECUTION PLAN (3–4 bullets — never 2, never 5)
+- Group their scattered requirements into named deliverables. Lead each bullet with a short capitalised label, then a colon, then the concrete mechanics.
+- Labels come from THEIR job, not from a fixed list. Examples of the right shape: "Design/Theme Customization:", "Data/Catalog Transfer:", "System Setup & Integrations:", "Migration & DNS:", "API & Webhooks:", "Testing & Handover:".
+- After the colon, name the real technical steps and tools, in their vocabulary and numbers ("all 23 pages", "product variants and images", "301 redirects", "Stripe and shipping zones").
+- Bulleting the mechanics is what proves you know HOW to do the work rather than merely that you want it. One line each, 12–22 words. No sub-bullets.
 
-BLOCK 3 — THE ASK (EARLY, not at the end)
-- ONE short question asking for the exact access or input you need to start: editor credentials, repo access, designs, a sample file, admin login.
-- If their post already offers it ("message me for credentials"), ask for precisely that.
-- Frame it as needed BEFORE committing: "… so we can inspect the build before quoting?"
+BLOCK 3 — THE TECHNICAL CTA (exactly one question)
+- Close the body with ONE specific, technical discovery question about their CURRENT SETUP or FILE STATUS. It must be answerable in one line of chat, and must be something you genuinely need before starting.
+- Right shape: "Is your product data exportable as a CSV from your current admin, or is it only in the live database?" / "Are you on managed hosting with cPanel, or a VPS where I'd need SSH access?" / "Do you have the original layered design files, or am I rebuilding from the live pages?"
+- Pull it from what their post leaves AMBIGUOUS. If they already stated the answer ("I have a WooCommerce CSV export"), ask about something else — asking what they already told you reads as not having read the brief.
+- BANNED: any generic timeline, budget, or availability question — "When do you need this done?", "What's your budget?", "When can we start?", "Do you have a deadline?", "Let me know if you're interested."
+- ONE question only. Two splits the reply and slows the client down.
 - Never ask for email, phone, WhatsApp, or off-platform contact — that breaks Freelancer rules.
+- The mechanism is deliberate: a technical question the client can answer instantly makes them hit Reply, which opens the chat window where projects are actually awarded.
 
-BLOCK 4 — UNDERSTANDINGS
-- Start with the literal header line: "Understandings; (correct if needed)"
-- Then EXACTLY 3 numbered lines: "1. ", "2. ", "3. " — NEVER bullets, dashes, or "•".
-- Each is a concrete step or assumption in 8–16 words, naming the real action and order of work (audit first, then repair; test desktop and mobile; restore dashboard access).
-- Inviting correction is deliberate — it lowers the client's risk and starts a conversation.
-
-BLOCK 5 — SIGN-OFF
-- Exactly two lines: "${BID_SIGNOFF}" then "${BID_AUTHOR}". No blank line between them.
-
-BLOCK 6 — PROOF, DEFERRED
-- ONE line AFTER the sign-off offering to share directly relevant past work in private chat, naming the specific niche: e.g. "I will share similar WordPress repair/recovery work in a private chat."
-- This is why it works: it gives the client a reason to reply, and keeps the bid honest — you show proof instead of claiming numbers.
+BLOCK 4 — SIGN-OFF
+- Exactly two lines: "${BID_SIGNOFF}" then "${BID_AUTHOR}". No blank line between them. Nothing after the name.
 
 LENGTH
-- 85–115 words total. Dense, not padded. If short, add specificity to the 3 understandings — never add filler sentences or extra blocks.
+- Under ${MAX_WORDS} words TOTAL — aim 115–140. Dense, not padded. If it runs short, add technical specificity inside the bullets; never add a fifth bullet or a filler sentence.
 
 TONE
-- Plain, natural English. Slightly clipped and practical, like a working developer typing fast.
-- No buzzwords, no "Dear Sir/Madam", no flattery, no "I am excited/interested", no superlatives.
-- Match the client's own tone and reuse their words.
+- Direct, authoritative, professional. Plain English, no buzzwords.
+- No flattery, no "I am excited/passionate", no superlatives, no "100% guarantee", no emoji.
+- Reuse the client's own nouns and numbers instead of paraphrasing into generic words.
 
 HONESTY
 - Never invent client names, fake numbers, or projects we didn't do.
-- No "100% guarantee" or unrealistic timelines.
-- Claim only that you CHECKED the link they shared — never claim to have already diagnosed, fixed, or logged into anything.${tone}${extraRules}${portfolio}${examples}`;
+- Promise only work you would actually do, on realistic timelines.
+- If their post shares a URL you may say you looked at it — never claim you already diagnosed, logged into, or fixed anything.${tone}${extraRules}${portfolio}${examples}`;
 }
 
 /** The shared JSON contract + reminder of the winning shape, used by every proposal call. */
 function jsonSpec(extra = ""): string {
   return `Return STRICT JSON only:
-{"score": <1-10 int${extra}>, "reasons": [<short strings>], "redFlags": [<short strings, [] if none>], "proposal": "<the proposal TEXT ONLY — 85–115 words, following the six-block layout exactly: 'Hello, I checked <url>' / 'Let us …' scope sentence / one access question / 'Understandings; (correct if needed)' + 3 NUMBERED lines / '${BID_SIGNOFF}' + '${BID_AUTHOR}' / one private-chat proof line AFTER the sign-off>"}`;
+{"score": <1-10 int${extra}>, "reasons": [<short strings>], "redFlags": [<short strings, [] if none>], "proposal": "<the proposal TEXT ONLY — under ${MAX_WORDS} words, following the four-block layout exactly: 2 active-voice hook lines ('I can…' / 'I'll handle…', no greeting) / 3–4 labelled deliverable bullets / ONE specific technical question about their current setup or file status / '${BID_SIGNOFF}' + '${BID_AUTHOR}'>"}`;
 }
 
 function userPrompt(p: FreelancerProject): string {
   const links = extractLinks(p.description);
   const linkBlock = links.length
-    ? `\nLinks the client shared (open BLOCK 1 with the one that needs the work — paste it verbatim):\n${links.map((l) => `- ${l}`).join("\n")}`
-    : `\nLinks the client shared: none — use the "no URL" form of BLOCK 1.`;
+    ? `\nLinks the client shared (name the relevant one in the hook or the closing question — paste it verbatim):\n${links.map((l) => `- ${l}`).join("\n")}`
+    : `\nLinks the client shared: none — anchor the hook on the most specific artifact in their post instead.`;
 
   return `Project on Freelancer.com:
 Title: ${p.title}
@@ -255,39 +256,45 @@ async function callWithFailover(system: string, user: string): Promise<string> {
 const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
 
 /**
- * Some models (notably Groq/Llama) write very concise proposals that fall under the
- * 90-word floor. If so, do ONE expand pass that keeps the same structure but adds
- * concrete detail. Cheap + fast; only runs when the draft is short.
+ * Guard the word budget in ONE extra call, and only when the draft is clearly off:
+ * over the MAX_WORDS ceiling (models pad the bullets) or under ~85 words (Groq/Llama
+ * write terse). Borderline drafts are left alone — a second pass on every proposal
+ * triples token usage and trips free-tier rate limits.
  */
 async function ensureLength(result: AiResult, agency: AgencyProfile): Promise<AiResult> {
-  // Concise models (Groq/Llama) sometimes write short. Do at most ONE expand pass,
-  // and only when the draft is clearly short (< 80 words) — expanding every borderline
-  // proposal triples token usage and trips free-tier rate limits.
-  for (let attempt = 0; attempt < 1; attempt++) {
-    if (!result.proposal || wordCount(result.proposal) >= 80) break;
-    const wc = wordCount(result.proposal);
-    const user = `The proposal below is only ${wc} words — too short. Rewrite it to 95–115 words.
+  const wc = wordCount(result.proposal || "");
+  const tooLong = wc > MAX_WORDS;
+  if (!result.proposal || (!tooLong && wc >= 85)) return result;
 
-KEEP all six blocks exactly as they are, in order and unchanged in kind: the "Hello, I checked …" opener (same URL, verbatim), the "Let us …" scope sentence, the access question, the "Understandings; (correct if needed)" header with its 3 NUMBERED lines, the "${BID_SIGNOFF}" / "${BID_AUTHOR}" sign-off, and the private-chat proof line AFTER the sign-off.
+  const fix = tooLong
+    ? `The proposal below is ${wc} words — over the ${MAX_WORDS}-word ceiling. Cut it to 115–140 words.
 
-Add the extra words ONLY by making the 3 understandings more specific — name the actual step, page count, or tool. Do NOT add a new block, a new sentence, filler, flattery, or any invented claim. Keep the numbered list numbered (never bullets). Keep one blank line between blocks, but NO blank line between the "Understandings" header and the numbers, and none between the sign-off line and the name.
+Remove words, never blocks: tighten the two hook lines and trim each bullet to its essential deliverable. Do NOT drop a bullet, drop the closing technical question, or drop the sign-off.`
+    : `The proposal below is only ${wc} words — too thin. Rewrite it to 115–140 words.
+
+Add the extra words ONLY by making the bullets more specific — name the actual platform, file type, page count, or integration. Do NOT add a fifth bullet, add flattery, or invent a claim.`;
+
+  const user = `${fix}
+
+KEEP the structure exactly: two active-voice hook lines ("I can…" / "I'll handle…", no greeting), 3–4 labelled deliverable bullets, ONE specific technical question about their current setup or file status, then "${BID_SIGNOFF}" and "${BID_AUTHOR}". Keep the bullets bulleted. Keep one blank line between blocks, but NO blank line between the two hook lines, none between bullets, and none between the sign-off line and the name.
 
 Current proposal:
 """
 ${result.proposal}
 """
 
-Return STRICT JSON only: {"proposal": "<the expanded 95–115 word proposal text only>"}`;
-    try {
-      const raw = await callWithFailover(systemPrompt(agency), user);
-      // Use the same salvage parser — the expanded proposal contains real line breaks
-      // (the bullet list), which would make a raw JSON.parse throw.
-      const expanded = parse(raw, null).proposal;
-      if (!expanded || wordCount(expanded) <= wc) break; // no progress — stop
-      result.proposal = expanded.trim();
-    } catch {
-      break; // keep the best proposal so far if the expand call fails
-    }
+Return STRICT JSON only: {"proposal": "<the rewritten 115–140 word proposal text only>"}`;
+
+  try {
+    // Same salvage parser: the proposal contains real line breaks (the bullet list),
+    // which would make a raw JSON.parse throw.
+    const raw = await callWithFailover(systemPrompt(agency), user);
+    const fixed = parse(raw, null).proposal;
+    const fwc = wordCount(fixed);
+    // Accept only if it actually moved toward the target window.
+    if (fixed && fwc <= MAX_WORDS && (tooLong ? fwc < wc : fwc > wc)) result.proposal = fixed.trim();
+  } catch {
+    /* keep the best proposal we have */
   }
   return result;
 }
@@ -299,8 +306,8 @@ Return STRICT JSON only: {"proposal": "<the expanded 95–115 word proposal text
 export async function proposeFromText(description: string, agency: AgencyProfile): Promise<AiResult> {
   const links = extractLinks(description);
   const linkBlock = links.length
-    ? `\nLinks the client shared (open BLOCK 1 with the one that needs the work — paste it verbatim):\n${links.map((l) => `- ${l}`).join("\n")}`
-    : `\nLinks the client shared: none — use the "no URL" form of BLOCK 1.`;
+    ? `\nLinks the client shared (name the relevant one in the hook or the closing question — paste it verbatim):\n${links.map((l) => `- ${l}`).join("\n")}`
+    : `\nLinks the client shared: none — anchor the hook on the most specific artifact in their post instead.`;
 
   const user = `A potential client posted this project. Write a winning bid proposal for it.
 
@@ -399,28 +406,32 @@ function mockDoc(description: string, a: AgencyProfile): ProjectDoc {
   };
 }
 
-/** A mock in the winning six-block shape, so offline output previews the real layout. */
+/** A mock in the four-block shape, so offline output previews the real layout. */
 function mockProposal(subject: string, description: string, niche: string): string {
   const link = extractLinks(description)[0];
-  const opener = link ? `Hello, I checked ${link}` : `Hello, I read through your ${subject} post.`;
+  // The CTA asks about whatever the post leaves ambiguous — platform if they shared a
+  // URL we could look at, file status otherwise.
+  const cta = link
+    ? `Is ${link} running a stock theme, or has it already been custom-coded on top?`
+    : `Is your existing content exportable as a CSV/XML file, or does it only live in the admin panel?`;
   return tidyProposal(
     [
-      opener,
-      `Let us complete your ${subject} — confirm the full scope, do the build, verify on desktop and mobile, and hand it back fully editable.`,
-      `Send access so we can inspect the current setup before quoting?`,
-      `Understandings; (correct if needed)`,
-      `1. Audit the current state first, then repair rather than rebuild if salvageable`,
-      `2. Confirm every deliverable you listed, tested on both desktop and mobile`,
-      `3. Hand back clean, documented, and editable by your own team`,
+      `I can deliver your ${subject} end to end, on your current stack.`,
+      `I'll keep your existing brand identity intact throughout — same look, same voice, nothing rebuilt from scratch.`,
+      `- Design/Theme Customization: rebuild your current look — fonts, colours, spacing, layout — responsive across desktop and mobile.`,
+      `- Data/Catalog Transfer: migrate content, media, and records with existing URLs preserved via 301 redirects.`,
+      `- System Setup & Integrations: wire up payments, forms, email, and analytics, then test each one on the live site.`,
+      `- Testing & Handover: clean ${niche} build, documented and fully editable by your own team.`,
+      cta,
       BID_SIGNOFF,
       BID_AUTHOR,
-      `I will share similar ${niche} work in a private chat.`,
     ].join("\n")
   );
 }
 
 function mockFromText(description: string, a: AgencyProfile): AiResult {
-  const short = description.trim().slice(0, 60);
+  // Collapse whitespace: a raw slice can carry newlines, which would split the hook line.
+  const short = description.trim().replace(/\s+/g, " ").slice(0, 60);
   return {
     score: 7,
     reasons: ["Matches agency skills"],
@@ -566,20 +577,20 @@ const clamp = (n: any) => Math.max(1, Math.min(10, Math.round(Number(n) || 5)));
 const arr = (x: any): string[] => (Array.isArray(x) ? x.filter((s) => typeof s === "string") : []);
 
 const LIST_MARKER = /^(?:\d+[.)]|[-*•])\s+/;
-const UNDERSTANDINGS = /^understandings\b/i;
-/** "Best regards," / "Thanks," / "Regards" — the line that sits directly above the name. */
-const SIGNOFF_WORDS = "best regards|kind regards|warm regards|regards|thanks|thank you|sincerely|cheers";
+/** "Best," / "Best regards," / "Thanks," — the line that sits directly above the name. */
+const SIGNOFF_WORDS = "best regards|kind regards|warm regards|regards|best|thanks|thank you|sincerely|cheers";
 const SIGNOFF_ONLY = new RegExp(`^(?:${SIGNOFF_WORDS})\\s*,?\\s*$`, "i");
 const SIGNOFF_INLINE = new RegExp(`^((?:${SIGNOFF_WORDS}))\\s*,\\s*(\\S.{0,40})$`, "i");
 
 /**
- * Normalise the model's proposal into the exact shape of our awarded bids — independent
+ * Normalise the model's proposal into the exact shape the guide specifies — independent
  * of how tidily the model formatted it. We own the whitespace here so every bid looks
- * the same as the ones that won:
- *   - list items are NUMBERED ("1. "), never bullets — models love "•", we renumber them
- *   - NO blank line between "Understandings; (correct if needed)" and the numbers
+ * the same:
+ *   - list items are "• " bullets, never numbers — models emit "1.", "-" and "*" freely
+ *   - NO blank line between the two hook lines (they read as one opening block)
+ *   - NO blank line between bullets
  *   - NO blank line between the sign-off line and the name
- *   - a blank line between every other block, including before the trailing proof line
+ *   - a blank line between every other block, including before the closing question
  */
 function tidyProposal(s: string): string {
   let t = (s || "").trim();
@@ -593,7 +604,7 @@ function tidyProposal(s: string): string {
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
-  // Split an inline "Best regards, Sathies" onto the two lines the winning layout uses.
+  // Split an inline "Best, Seba" onto the two lines the layout uses.
   const split: string[] = [];
   for (const l of raw) {
     const m = !LIST_MARKER.test(l) && l.match(SIGNOFF_INLINE);
@@ -601,25 +612,19 @@ function tidyProposal(s: string): string {
     else split.push(l);
   }
 
-  // Renumber every run of list items sequentially, converting bullets to numbers.
-  const lines: string[] = [];
-  let n = 0;
-  for (const l of split) {
-    if (LIST_MARKER.test(l)) lines.push(`${++n}. ${l.replace(LIST_MARKER, "")}`);
-    else {
-      n = 0;
-      lines.push(l);
-    }
-  }
+  // Normalise every list marker to "• " — the guide's execution plan is bulleted, not numbered.
+  const lines = split.map((l) => (LIST_MARKER.test(l) ? `• ${l.replace(LIST_MARKER, "")}` : l));
 
   const out: string[] = [];
   for (const line of lines) {
     const prev = out.length ? out[out.length - 1] : "";
     if (prev) {
-      const glueToHeader = UNDERSTANDINGS.test(prev) && LIST_MARKER.test(line);
+      // The hook is two adjacent lines: glue line 2 to line 1 unless the model wrote a
+      // one-line hook and went straight into the bullets.
+      const glueHook = out.length === 1 && !LIST_MARKER.test(line) && !SIGNOFF_ONLY.test(prev);
       const glueToList = LIST_MARKER.test(prev) && LIST_MARKER.test(line);
       const glueToSignoff = SIGNOFF_ONLY.test(prev);
-      if (!glueToHeader && !glueToList && !glueToSignoff) out.push("");
+      if (!glueHook && !glueToList && !glueToSignoff) out.push("");
     }
     out.push(line);
   }
